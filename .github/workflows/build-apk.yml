@@ -1,0 +1,56 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get source code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Restore Android project from source archive
+        shell: bash
+        run: |
+          unzip -oq HawalatAbuAlawi-source.zip -d "$RUNNER_TEMP/hawalat-source"
+          test -f "$RUNNER_TEMP/hawalat-source/build.gradle"
+          test -f "$RUNNER_TEMP/hawalat-source/settings.gradle"
+          test -f "$RUNNER_TEMP/hawalat-source/gradle.properties"
+          test -f "$RUNNER_TEMP/hawalat-source/app/build.gradle"
+          test -f "$RUNNER_TEMP/hawalat-source/app/src/main/AndroidManifest.xml"
+          cp "$RUNNER_TEMP/hawalat-source/build.gradle" ./build.gradle
+          cp "$RUNNER_TEMP/hawalat-source/settings.gradle" ./settings.gradle
+          cp "$RUNNER_TEMP/hawalat-source/gradle.properties" ./gradle.properties
+          rm -rf app
+          cp -a "$RUNNER_TEMP/hawalat-source/app" ./app
+
+      - name: Build APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify APK
+        run: test -s app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Save APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hawalat-Abu-Alawi
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
