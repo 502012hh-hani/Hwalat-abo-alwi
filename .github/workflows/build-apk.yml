@@ -38,7 +38,8 @@ jobs:
           test -f "$RUNNER_TEMP/hawalat-source/app/src/main/AndroidManifest.xml"
           python3 - <<'PY'
           from pathlib import Path
-          p = Path("$RUNNER_TEMP/hawalat-source/app/src/main/AndroidManifest.xml")
+          import os
+          p = Path(os.environ["RUNNER_TEMP"]) / "hawalat-source/app/src/main/AndroidManifest.xml"
           s = p.read_text(encoding="utf-8")
           service = '''\n        <service\n            android:name=".WhatsAppNotificationListener"\n            android:label="حوالات أبو علوي"\n            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"\n            android:exported="true">\n            <intent-filter>\n                <action android:name="android.service.notification.NotificationListenerService" />\n            </intent-filter>\n        </service>\n'''
           if "WhatsAppNotificationListener" not in s:
