@@ -36,6 +36,17 @@ jobs:
           test -f "$RUNNER_TEMP/hawalat-source/gradle.properties"
           test -f "$RUNNER_TEMP/hawalat-source/app/build.gradle"
           test -f "$RUNNER_TEMP/hawalat-source/app/src/main/AndroidManifest.xml"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("$RUNNER_TEMP/hawalat-source/app/src/main/AndroidManifest.xml")
+          s = p.read_text(encoding="utf-8")
+          service = '''\n        <service\n            android:name=".WhatsAppNotificationListener"\n            android:label="حوالات أبو علوي"\n            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"\n            android:exported="true">\n            <intent-filter>\n                <action android:name="android.service.notification.NotificationListenerService" />\n            </intent-filter>\n        </service>\n'''
+          if "WhatsAppNotificationListener" not in s:
+              s = s.replace("    </application>", service + "    </application>")
+              p.write_text(s, encoding="utf-8")
+          if "WhatsAppNotificationListener" not in p.read_text(encoding="utf-8"):
+              raise SystemExit("Notification listener service was not added")
+          PY
           cp "$RUNNER_TEMP/hawalat-source/build.gradle" ./build.gradle
           cp "$RUNNER_TEMP/hawalat-source/settings.gradle" ./settings.gradle
           cp "$RUNNER_TEMP/hawalat-source/gradle.properties" ./gradle.properties
