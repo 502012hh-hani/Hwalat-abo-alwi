@@ -66,9 +66,19 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         processMessage(body, group, posted);
     }
 
-    private boolean isTargetSender(String title) {
-        String t = title == null ? "" : title.replaceAll("\\s+", " ").trim();
-        return t.equals(SENDER) || t.contains(SENDER);
+    private boolean isTargetSender(String value) {
+        if (value == null || value.trim().isEmpty()) return false;
+        String t = normalizeArabic(value).replaceAll("[^\\p{IsArabic}]", "");
+        String target = normalizeArabic(SENDER).replaceAll("[^\\p{IsArabic}]", "");
+        return t.contains(target);
+    }
+
+    private String stripSenderPrefix(String value) {
+        if (value == null) return "";
+        String s = normalizeArabic(value);
+        // Group notifications may prepend the sender name to the message body.
+        s = s.replaceAll("ابو\\s*علوي\\s*رقم\\s*جديد\\s*[:：،\\-]?\\s*", "");
+        return s.trim();
     }
 
     private void processMessage(String body, String group, long posted) {
@@ -85,15 +95,19 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         String[] saved = pending.split("\\t", -1);
         if (saved.length >= 3) {
             try { pendingTime = Long.parseLong(saved[0]); } catch (Exception ignored) {}
-            if (posted - pendingTime >= 0 && posted - pendingTime <= PAIR_WINDOW_MS) {
+            if (pendingTime > 0 && posted >= pendingTime && posted - pendingTime <= PAIR_WINDOW_MS) {
                 pendingName = saved[1];
                 pendingAmount = saved[2];
+            } else if (!pending.isEmpty()) {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(pendingKey).apply();
+                pendingTime = 0L;
             }
         }
 
+        String cleanBody = stripSenderPrefix(body);
         String name = "";
         String amount = "";
-        String[] messageLines = normalize(body).split("[\\r\\n]+");
+        String[] messageLines = cleanBody.split("[\\r\\n]+");
         for (String rawLine : messageLines) {
             String line = rawLine.trim();
             if (line.isEmpty()) continue;
@@ -104,14 +118,25 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         }
 
         // Also handle a combined message where the recipient and amount share a line.
-        if (name.isEmpty()) name = extractName(normalize(body));
-        if (amount.isEmpty()) amount = extractAmount(normalize(body));
+        if (name.isEmpty()) name = extractName(cleanBody);
+        if (amount.isEmpty()) amount = extractAmount(cleanBody);
 
+        // Do not silently combine two different recipient-name fragments or two
+        // amount fragments. Keep the newest fragment and wait for its counterpart.
+        if (!name.isEmpty() && !pendingName.isEmpty() && pendingAmount.isEmpty()) {
+            pendingName = "";
+            pendingTime = 0L;
+        }
+        if (!amount.isEmpty() && !pendingAmount.isEmpty() && pendingName.isEmpty()) {
+            pendingAmount = "";
+            pendingTime = 0L;
+        }
         if (!name.isEmpty()) pendingName = name;
         if (!amount.isEmpty()) pendingAmount = amount;
 
         if (!pendingName.isEmpty() && !pendingAmount.isEmpty()) {
-            saveTransfer(group, pendingName, pendingAmount, posted);
+            long transferTime = pendingTime > 0 ? pendingTime : posted;
+            saveTransfer(group, pendingName, pendingAmount, transferTime);
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(pendingKey).apply();
             return;
         }
@@ -200,6 +225,11 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                 .replace('٥','5').replace('٦','6').replace('٧','7').replace('٨','8').replace('٩','9')
                 .replace('۰','0').replace('۱','1').replace('۲','2').replace('۳','3').replace('۴','4')
                 .replace('۵','5').replace('۶','6').replace('۷','7').replace('۸','8').replace('۹','9');
+    }
+
+    private static String normalizeArabic(String s) {
+        return s == null ? "" : s.replace('أ','ا').replace('إ','ا').replace('آ','ا')
+                .replace('ى','ي').replaceAll("[\\u064B-\\u065F\\u0670]", "");
     }
 
     private void setStatus(String value) {
