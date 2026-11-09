@@ -46,14 +46,14 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
         // In WhatsApp group notifications the sender is normally EXTRA_TITLE,
         // while the group name is EXTRA_SUB_TEXT or EXTRA_CONVERSATION_TITLE.
-        if (!isTargetSender(title)) {
+        if (!isTargetSender(title) && !isTargetSender(body)) {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                     .putString("last_status", "وصل إشعار واتساب، لكن عنوانه ليس المرسل المطلوب")
                     .apply();
             return;
         }
 
-        String groupText = sub + " " + conversation + " " + title;
+        String groupText = sub + " " + conversation + " " + title + " " + body;
         String group = groupText.contains("العمقي") ? "العمقي"
                 : (groupText.contains("بن دول") ? "بن دول » محمد علوي احمد" : "");
         if (group.isEmpty()) {
