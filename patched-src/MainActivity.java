@@ -1,6 +1,9 @@
 package com.abualawi.hawalat;
 
 import android.app.Activity;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.os.Bundle;
@@ -31,6 +34,7 @@ public class MainActivity extends Activity {
         entries=new TextView(this); entries.setTextSize(14); entries.setPadding(0,20,0,20); layout.addView(entries);
         TextView note=new TextView(this); note.setTextSize(13); note.setText("يستقبل التطبيق الإشعارات التي يظهر فيها اسم المرسل والمجموعة. ملفات CSV تفتح ببرنامج Excel."); layout.addView(note);
         setContentView(layout);
+        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 71);
     }
     @Override protected void onResume(){super.onResume();updateStatus();showEntries();}
     private void updateStatus(){
