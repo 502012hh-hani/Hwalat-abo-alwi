@@ -52,7 +52,10 @@ jobs:
           s = p.read_text()
           permission = '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />'
           if permission not in s:
-              s = s.replace("<manifest", "<manifest\n    " + permission, 1)
+              end = s.find(">", s.find("<manifest"))
+              if end < 0:
+                  raise SystemExit("Manifest opening tag not found")
+              s = s[:end + 1] + "\\n    " + permission + s[end + 1:]
           p.write_text(s)
           PY
 
