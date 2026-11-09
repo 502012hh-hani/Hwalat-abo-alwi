@@ -36,29 +36,25 @@ jobs:
           test -f "$RUNNER_TEMP/hawalat-source/gradle.properties"
           test -f "$RUNNER_TEMP/hawalat-source/app/build.gradle"
           test -f "$RUNNER_TEMP/hawalat-source/app/src/main/AndroidManifest.xml"
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          p = Path(os.environ["RUNNER_TEMP"]) / "hawalat-source/app/src/main/AndroidManifest.xml"
-          s = p.read_text(encoding="utf-8")
-          service = '''\n        <service\n            android:name=".WhatsAppNotificationListener"\n            android:label="حوالات أبو علوي"\n            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"\n            android:exported="true">\n            <intent-filter>\n                <action android:name="android.service.notification.NotificationListenerService" />\n            </intent-filter>\n        </service>\n'''
-          if "WhatsAppNotificationListener" not in s:
-              s = s.replace("    </application>", service + "    </application>")
-              p.write_text(s, encoding="utf-8")
-          if "WhatsAppNotificationListener" not in p.read_text(encoding="utf-8"):
-              raise SystemExit("Notification listener service was not added")
-          PY
           cp "$RUNNER_TEMP/hawalat-source/build.gradle" ./build.gradle
           cp "$RUNNER_TEMP/hawalat-source/settings.gradle" ./settings.gradle
           cp "$RUNNER_TEMP/hawalat-source/gradle.properties" ./gradle.properties
           rm -rf app
           cp -a "$RUNNER_TEMP/hawalat-source/app" ./app
+          mkdir -p app/src/main/java/com/abualawi/hawalat
+          cp patched-src/MainActivity.java app/src/main/java/com/abualawi/hawalat/MainActivity.java
+          cp patched-src/WhatsAppNotificationListener.java app/src/main/java/com/abualawi/hawalat/WhatsAppNotificationListener.java
+          grep -q 'android:name=".WhatsAppNotificationListener"' app/src/main/AndroidManifest.xml
+          grep -q 'android.service.notification.NotificationListenerService' app/src/main/AndroidManifest.xml
 
       - name: Build APK
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Verify APK
-        run: test -s app/build/outputs/apk/debug/app-debug.apk
+        run: |
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          test "$(stat -c%s app/build/outputs/apk/debug/app-debug.apk)" -gt 10000
+          unzip -t app/build/outputs/apk/debug/app-debug.apk
 
       - name: Save APK
         uses: actions/upload-artifact@v4
