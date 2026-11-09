@@ -28,7 +28,9 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         CharSequence[] lines=e.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
         if(lines!=null) for(CharSequence x:lines) body += "\n"+str(x);
         String all=title+"\n"+sub+"\n"+body;
-        if(!all.contains(SENDER)) return;
+        String stamp=new SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(new Date(sbn.getPostTime()));
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("debug_last_notification",stamp+"\\nالعنوان: "+title+"\\nالعنوان الفرعي: "+sub+"\\nالنص: "+body).putString("last_status","وصل إشعار واتساب؛ جارٍ فحص بياناته").apply();
+        if(!all.contains(SENDER)) { getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("last_status","وصل إشعار واتساب لكن لم يظهر اسم المرسل المطلوب في تفاصيله").apply(); return; }
         String groupText=title+" "+sub;
         String group=groupText.contains(G1)?"العمقي":groupText.contains(G2)?"بن دول » محمد علوي احمد":"";
         if(group.isEmpty()) return;
