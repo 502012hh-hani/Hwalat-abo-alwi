@@ -47,7 +47,8 @@ public class MainActivity extends Activity {
     private void showEntries(){
         String a=getSharedPreferences("hawalat",MODE_PRIVATE).getString("rows_العمقي","");
         String b=getSharedPreferences("hawalat",MODE_PRIVATE).getString("rows_بن دول » محمد علوي احمد","");
-        entries.setText("سجلات العمقي: "+count(a)+"\nسجلات بن دول: "+count(b)+"\n\nآخر السجلات محفوظة على الهاتف.");
+        String raw=getSharedPreferences("hawalat",MODE_PRIVATE).getString("debug_last_notification","لم يصل أي إشعار واتساب إلى خدمة التطبيق بعد.");
+        entries.setText("سجلات العمقي: "+count(a)+"\\nسجلات بن دول: "+count(b)+"\\n\\nآخر السجلات محفوظة على الهاتف.\\n\\nآخر إشعار واتساب للتشخيص:\\n"+raw);
         updateStatus();
     }
     private int count(String s){if(TextUtils.isEmpty(s))return 0;return s.split("\\n").length;}
