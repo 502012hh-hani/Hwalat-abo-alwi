@@ -46,6 +46,15 @@ jobs:
           cp patched-src/WhatsAppNotificationListener.java app/src/main/java/com/abualawi/hawalat/WhatsAppNotificationListener.java
           grep -q 'android:name=".WhatsAppNotificationListener"' app/src/main/AndroidManifest.xml
           grep -q 'android.service.notification.NotificationListenerService' app/src/main/AndroidManifest.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          permission = '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />'
+          if permission not in s:
+              s = s.replace("<manifest", "<manifest\n    " + permission, 1)
+          p.write_text(s)
+          PY
 
       - name: Build APK
         run: gradle --no-daemon :app:assembleDebug
