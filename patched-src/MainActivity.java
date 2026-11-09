@@ -48,10 +48,10 @@ public class MainActivity extends Activity {
         String a=getSharedPreferences("hawalat",MODE_PRIVATE).getString("rows_العمقي","");
         String b=getSharedPreferences("hawalat",MODE_PRIVATE).getString("rows_بن دول » محمد علوي احمد","");
         String raw=getSharedPreferences("hawalat",MODE_PRIVATE).getString("debug_last_notification","لم يصل أي إشعار واتساب إلى خدمة التطبيق بعد.");
-        entries.setText("سجلات العمقي: "+count(a)+"\\nسجلات بن دول: "+count(b)+"\\n\\nآخر السجلات محفوظة على الهاتف.\\n\\nآخر إشعار واتساب للتشخيص:\\n"+raw);
+        entries.setText("سجلات العمقي: "+count(a)+"\nسجلات بن دول: "+count(b)+"\n\nآخر السجلات محفوظة على الهاتف.\n\nآخر إشعار واتساب للتشخيص:\n"+raw);
         updateStatus();
     }
-    private int count(String s){if(TextUtils.isEmpty(s))return 0;return s.split("\\n").length;}
+    private int count(String s){if(TextUtils.isEmpty(s))return 0;return s.split("\n").length;}
     private void exportFiles(){
         if(!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())){Toast.makeText(this,"التخزين غير متاح",Toast.LENGTH_LONG).show();return;}
         try{
@@ -65,7 +65,7 @@ public class MainActivity extends Activity {
     private int writeGroup(File dir,String label,String prefKey,String today)throws Exception{
         String data=getSharedPreferences("hawalat",MODE_PRIVATE).getString(prefKey,"");
         StringBuilder csv=new StringBuilder("\uFEFFاسم المستلم,المبلغ,التاريخ,الوقت\r\n"); int n=0;
-        for(String row:data.split("\\n")){
+        for(String row:data.split("\n")){
             String[] p=row.split("\\t",-1); if(p.length<4||!today.equals(p[0]))continue;
             csv.append(q(p[2])).append(',').append(q(p[3])).append(',').append(q(p[0])).append(',').append(q(p[1])).append("\r\n"); n++;
         }
