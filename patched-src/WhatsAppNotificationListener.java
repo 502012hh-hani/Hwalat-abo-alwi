@@ -29,7 +29,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         if(lines!=null) for(CharSequence x:lines) body += "\n"+str(x);
         String all=title+"\n"+sub+"\n"+body;
         String stamp=new SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(new Date(sbn.getPostTime()));
-        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("debug_last_notification",stamp+"\\nالعنوان: "+title+"\\nالعنوان الفرعي: "+sub+"\\nالنص: "+body).putString("last_status","وصل إشعار واتساب؛ جارٍ فحص بياناته").apply();
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("debug_last_notification",stamp+"\nالعنوان: "+title+"\nالعنوان الفرعي: "+sub+"\nالنص: "+body).putString("last_status","وصل إشعار واتساب؛ جارٍ فحص بياناته").apply();
         if(!all.contains(SENDER)) { getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("last_status","وصل إشعار واتساب لكن لم يظهر اسم المرسل المطلوب في تفاصيله").apply(); return; }
         String groupText=title+" "+sub;
         String group=groupText.contains(G1)?"العمقي":groupText.contains(G2)?"بن دول » محمد علوي احمد":"";
@@ -79,10 +79,10 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         }
         if(amount==null) return null;
         String candidate="";
-        Matcher labeled=Pattern.compile("(?:المستلم|مستلم|المتسلم|الإسم|الاسم|باسم)\\s*[:：/\\-]?\\s*([^\\n\\r]+)",Pattern.CASE_INSENSITIVE).matcher(s);
+        Matcher labeled=Pattern.compile("(?:المستلم|مستلم|المتسلم|الإسم|الاسم|باسم)\\s*[:：/\\-]?\\s*([^\n\\r]+)",Pattern.CASE_INSENSITIVE).matcher(s);
         if(labeled.find()) candidate=labeled.group(1);
         if(candidate.isEmpty()) {
-            String[] lines=s.split("[\\n\\r]+");
+            String[] lines=s.split("[\n\\r]+");
             for(String line:lines) {
                 String clean=line.replaceAll("[0-9]+.*$","").replaceAll("(?i)ريال سعودي|ريال|سعودي|صافي|المكلا|حضرموت|عتق|شبوه|الروضة"," ").trim();
                 if(words(clean)>=3 && !clean.contains("المرسل") && !clean.contains("المبلغ")) { candidate=clean; break; }
