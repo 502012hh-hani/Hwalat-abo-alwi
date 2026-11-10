@@ -112,12 +112,18 @@ public class MainActivity extends Activity {
         String b = getSharedPreferences("hawalat", MODE_PRIVATE).getString("rows_بن دول » محمد علوي احمد", "");
         String raw = getSharedPreferences("hawalat", MODE_PRIVATE).getString("debug_last_notification", "لم يصل أي إشعار واتساب إلى خدمة التطبيق بعد.");
         String listener = getSharedPreferences("hawalat", MODE_PRIVATE).getString("listener_state", "لم تسجل الخدمة اتصالها بالنظام بعد");
+        String callbackPackage = getSharedPreferences("hawalat", MODE_PRIVATE).getString("last_callback_package", "لم يصل أي callback بعد");
+        long callbackTime = getSharedPreferences("hawalat", MODE_PRIVATE).getLong("last_callback_time", 0L);
+        String callbackStamp = callbackTime == 0L ? "غير متوفر" : new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(callbackTime));
+        String systemDebug = getSharedPreferences("hawalat", MODE_PRIVATE).getString("debug_last_system_notification", "لا توجد إشعارات نظام مسجلة");
         String checked = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
         entries.setText(
                 "وقت آخر تحديث للشاشة: " + checked +
                 "\n\nسجلات مجموعة العمقي: " + count(a) +
                 "\nسجلات مجموعة بن دول: " + count(b) +
                 "\n\nحالة خدمة استقبال الإشعارات:\n" + listener +
+                "\n\nآخر callback استلمه Android:\nالتطبيق: " + callbackPackage + "\nالوقت: " + callbackStamp +
+                "\n\nآخر إشعار نظام (للتشخيص):\n" + systemDebug +
                 "\n\nآخر حالة معالجة:\n" + getSharedPreferences("hawalat", MODE_PRIVATE).getString("last_status", "لا توجد") +
                 "\n\nآخر إشعار واتساب وصل للتطبيق:\n" + raw
         );
