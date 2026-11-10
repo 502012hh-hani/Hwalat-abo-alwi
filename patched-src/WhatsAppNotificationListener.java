@@ -65,6 +65,8 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                     String body = extras == null ? "" : str(extras.getCharSequence(Notification.EXTRA_TEXT));
                     if (details.length() > 0) details.append("\\n");
                     details.append(pkg).append(" | ").append(title).append(" | ").append(body);
+                    // Seed existing notifications once; process only later changes.
+                    processIfActiveNotificationChanged(item);
                 }
             }
             String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
@@ -83,6 +85,34 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
+        handleNotificationPosted(sbn, true);
+    }
+
+    // Android 5.0+ dispatches this overload; keep both entry points supported.
+    @Override
+    public void onNotificationPosted(StatusBarNotification sbn, RankingMap rankingMap) {
+        handleNotificationPosted(sbn, true);
+    }
+
+    private void processIfActiveNotificationChanged(StatusBarNotification sbn) {
+        if (sbn == null) return;
+        try {
+            Bundle extras = sbn.getNotification() == null ? null : sbn.getNotification().extras;
+            String signature = String.valueOf(sbn.getPostTime()) + "|" +
+                    (extras == null ? "" : extras.toString());
+            String key = "active_seen_" + Integer.toHexString(sbn.getKey().hashCode());
+            android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+            String previous = prefs.getString(key, null);
+            if (previous == null) {
+                prefs.edit().putString(key, signature).apply();
+            } else if (!previous.equals(signature)) {
+                prefs.edit().putString(key, signature).apply();
+                handleNotificationPosted(sbn, false);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void handleNotificationPosted(StatusBarNotification sbn, boolean recordCallback) {
         if (sbn == null) return;
         Notification n = sbn.getNotification();
         Bundle e = (n == null) ? null : n.extras;
@@ -139,18 +169,19 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             if (i > 0) limitedHistory.append("\n");
             limitedHistory.append(historyLines[i]);
         }
-        android.content.SharedPreferences.Editor diagnostic = prefs.edit()
-                .putString("last_callback_package", packageName)
-                .putLong("last_callback_time", posted)
-                .putString("callback_history", limitedHistory.toString());
-        // Keep generic Android callbacks separate so Xiaomi/system notifications
-        // cannot overwrite the last real WhatsApp notification shown in the UI.
+        android.content.SharedPreferences.Editor diagnostic = prefs.edit();
+        // Polling is a fallback path and must not be mislabeled as an Android callback.
+        if (recordCallback) {
+            diagnostic.putString("last_callback_package", packageName)
+                    .putLong("last_callback_time", posted)
+                    .putString("callback_history", limitedHistory.toString());
+        }
         boolean whatsappPackage = "com.whatsapp".equals(packageName)
                 || "com.whatsapp.w4b".equals(packageName);
         if (whatsappPackage) {
             diagnostic.putString("debug_last_notification", debug)
                     .putString("last_whatsapp_notification_time", stamp);
-        } else {
+        } else if (recordCallback) {
             diagnostic.putString("debug_last_system_notification", debug);
         }
         diagnostic.apply();
