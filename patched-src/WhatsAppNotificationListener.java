@@ -378,7 +378,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         // لا نقبل أرقام الحسابات/الهاتف الطويلة أو الأرقام الملتصقة بكلمات مثل "الرقم".
         for (String line : s.split("[\\r\\n]+")) {
             String value = line.trim();
-            Matcher standalone = Pattern.compile("^([0-9]{2,7})(?:\\\\s+.*)?$").matcher(value);
+            Matcher standalone = Pattern.compile("^([0-9]{2,7})(?:\\s+.*)?$").matcher(value);
             if (standalone.matches()) return standalone.group(1);
         }
         return "";
