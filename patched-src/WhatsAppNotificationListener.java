@@ -50,15 +50,22 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         String debug = stamp + "\nالتطبيق: " + packageName + "\nالعنوان: " + title
                 + "\nالعنوان الفرعي: " + sub + "\nعنوان المحادثة: " + conversation
                 + "\nالنص: " + body;
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putString("debug_last_notification", debug)
+        android.content.SharedPreferences.Editor diagnostic = getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("last_callback_package", packageName)
-                .putLong("last_callback_time", posted)
-                .putString("last_status", "استقبل النظام إشعاراً من: " + packageName)
-                .apply();
+                .putLong("last_callback_time", posted);
+        // Keep generic Android callbacks separate so Xiaomi/system notifications
+        // cannot overwrite the last real WhatsApp notification shown in the UI.
+        if ("com.whatsapp".equals(packageName)) {
+            diagnostic.putString("debug_last_notification", debug)
+                    .putString("last_whatsapp_notification_time", stamp);
+        } else {
+            diagnostic.putString("debug_last_system_notification", debug);
+        }
+        diagnostic.apply();
 
-        // Diagnostic callback is recorded before package or message filtering.
+        // Only WhatsApp notifications are shown in the "last WhatsApp" field.
         if (!"com.whatsapp".equals(packageName)) return;
+        setStatus("وصل إشعار واتساب؛ جارٍ التحقق من المرسل والمجموعة");
         if (e == null) {
             setStatus("وصل إشعار واتساب لكن بياناته النصية غير متاحة");
             return;
