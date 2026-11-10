@@ -1,6 +1,7 @@
 package com.abualawi.hawalat;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -21,6 +22,9 @@ import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
@@ -63,8 +67,18 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "تم تحديث حالة الخدمة وآخر إشعار", Toast.LENGTH_SHORT).show();
         });
 
+        Button recordsAlAmqi = new Button(this);
+        recordsAlAmqi.setText("سجلات مجموعة العمقي");
+        layout.addView(recordsAlAmqi);
+        recordsAlAmqi.setOnClickListener(v -> showGroupRecords("العمقي", "rows_العمقي"));
+
+        Button recordsBinDawol = new Button(this);
+        recordsBinDawol.setText("سجلات مجموعة بن دول");
+        layout.addView(recordsBinDawol);
+        recordsBinDawol.setOnClickListener(v -> showGroupRecords("بن دول", "rows_بن دول » محمد علوي احمد"));
+
         Button export = new Button(this);
-        export.setText("تصدير ملفات الحوالات اليومية");
+        export.setText("تصدير ملفات الحوالات اليومية للمجموعتين");
         layout.addView(export);
         export.setOnClickListener(v -> exportFiles());
 
@@ -138,6 +152,55 @@ public class MainActivity extends Activity {
                 "\n\nآخر حالة معالجة:\n" + getSharedPreferences("hawalat", MODE_PRIVATE).getString("last_status", "لا توجد") +
                 "\n\nآخر إشعار واتساب وصل للتطبيق:\n" + raw
         );
+    }
+
+    private void showGroupRecords(String label, String prefKey) {
+        String data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
+        ArrayList<String[]> rows = new ArrayList<>();
+        if (!TextUtils.isEmpty(data)) {
+            for (String row : data.split("\\n")) {
+                String[] p = row.split("\\t", -1);
+                if (p.length >= 4) rows.add(p);
+            }
+        }
+        Collections.sort(rows, new Comparator<String[]>() {
+            @Override public int compare(String[] x, String[] y) {
+                int byName = x[2].compareToIgnoreCase(y[2]);
+                if (byName != 0) return byName;
+                return x[3].compareTo(y[3]);
+            }
+        });
+        StringBuilder table = new StringBuilder();
+        table.append("اسم المستلم                 | المبلغ | الوقت | التاريخ\\n");
+        table.append("------------------------------------------------\\n");
+        for (String[] p : rows) {
+            table.append(p[2]).append(" | ").append(p[3]).append(" | ")
+                 .append(p[1]).append(" | ").append(p[0]).append("\\n");
+        }
+        if (rows.isEmpty()) table.append("لا توجد حوالات مكتملة مسجلة حتى الآن.");
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("سجلات مجموعة " + label + " (" + rows.size() + ")")
+                .setMessage(table.toString())
+                .setNegativeButton("إغلاق", null)
+                .setPositiveButton("تصدير إلى Excel", (d, w) -> exportOneGroup(label, prefKey))
+                .create();
+        dialog.show();
+    }
+
+    private void exportOneGroup(String label, String prefKey) {
+        if (!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
+            Toast.makeText(this, "التخزين غير متاح", Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "حوالات أبو علوي");
+            if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد التصدير");
+            String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
+            int n = writeGroup(dir, label, prefKey, today);
+            Toast.makeText(this, "تم تصدير " + n + " سجل إلى Documents/حوالات أبو علوي", Toast.LENGTH_LONG).show();
+        } catch (Exception ex) {
+            Toast.makeText(this, "تعذر التصدير: " + ex.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private String formatEntries(String data) {
