@@ -167,6 +167,8 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         // in EXTRA_TITLE / EXTRA_TEXT. Read those structured messages first.
         boolean structuredSenderMatched = false;
         StringBuilder structuredBody = new StringBuilder();
+        java.util.ArrayList<String> structuredTexts = new java.util.ArrayList<>();
+        java.util.ArrayList<Long> structuredTimes = new java.util.ArrayList<>();
         if (e != null) {
             Parcelable[] rawMessages = e.getParcelableArray(Notification.EXTRA_MESSAGES);
             if (rawMessages != null) {
@@ -187,6 +189,9 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                         structuredSenderMatched = true;
                         if (structuredBody.length() > 0) structuredBody.append("\n");
                         structuredBody.append(messageText);
+                        structuredTexts.add(messageText);
+                        long messageTime = message.getLong("time", sbn.getPostTime());
+                        structuredTimes.add(messageTime > 0 ? messageTime : sbn.getPostTime());
                     }
                 }
             }
@@ -246,7 +251,14 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
         setStatus("وصل إشعار واتساب؛ جارٍ التحقق من المرسل والمجموعة");
         setStatus("تم التعرف على المرسل والمجموعة: " + group);
-        processMessage(body, group, posted);
+        if (structuredSenderMatched && !structuredTexts.isEmpty()) {
+            // عالج كل رسالة أصلية من أبو علوي وحدها؛ لا تدمج أسماء ومبالغ رسائل مختلفة.
+            for (int i = 0; i < structuredTexts.size(); i++) {
+                processMessage(structuredTexts.get(i), group, structuredTimes.get(i));
+            }
+        } else {
+            processMessage(body, group, posted);
+        }
     }
 
     private String isTargetGroup(String value) {
