@@ -36,16 +36,34 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
-        if (sbn == null || !"com.whatsapp".equals(sbn.getPackageName())) return;
+        if (sbn == null) return;
         Notification n = sbn.getNotification();
-        if (n == null || n.extras == null) return;
+        Bundle e = (n == null) ? null : n.extras;
+        String packageName = sbn.getPackageName();
+        String title = e == null ? "" : str(e.getCharSequence(Notification.EXTRA_TITLE));
+        String sub = e == null ? "" : str(e.getCharSequence(Notification.EXTRA_SUB_TEXT));
+        String conversation = e == null ? "" : str(e.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE));
+        String big = e == null ? "" : str(e.getCharSequence(Notification.EXTRA_BIG_TEXT));
+        String body = e == null ? "" : (big.isEmpty() ? str(e.getCharSequence(Notification.EXTRA_TEXT)) : big);
+        long posted = sbn.getPostTime();
+        String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(posted));
+        String debug = stamp + "\nالتطبيق: " + packageName + "\nالعنوان: " + title
+                + "\nالعنوان الفرعي: " + sub + "\nعنوان المحادثة: " + conversation
+                + "\nالنص: " + body;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString("debug_last_notification", debug)
+                .putString("last_callback_package", packageName)
+                .putLong("last_callback_time", posted)
+                .putString("last_status", "استقبل النظام إشعاراً من: " + packageName)
+                .apply();
 
-        Bundle e = n.extras;
-        String title = str(e.getCharSequence(Notification.EXTRA_TITLE));
-        String sub = str(e.getCharSequence(Notification.EXTRA_SUB_TEXT));
-        String conversation = str(e.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE));
-        String big = str(e.getCharSequence(Notification.EXTRA_BIG_TEXT));
-        String body = big.isEmpty() ? str(e.getCharSequence(Notification.EXTRA_TEXT)) : big;
+        // Diagnostic callback is recorded before package or message filtering.
+        if (!"com.whatsapp".equals(packageName)) return;
+        if (e == null) {
+            setStatus("وصل إشعار واتساب لكن بياناته النصية غير متاحة");
+            return;
+        }
+
         CharSequence[] lines = e.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
         if (lines != null) {
             for (CharSequence line : lines) {
@@ -54,21 +72,9 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             }
         }
 
-        long posted = sbn.getPostTime();
-        String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(posted));
-        String debug = stamp + "\nالعنوان: " + title + "\nالمجموعة/العنوان الفرعي: " + sub
-                + "\nعنوان المحادثة: " + conversation + "\nالنص: " + body;
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putString("debug_last_notification", debug)
-                .putString("last_status", "وصل إشعار واتساب؛ جارٍ التحقق من المرسل والمجموعة")
-                .apply();
-
-        // In WhatsApp group notifications the sender is normally EXTRA_TITLE,
-        // while the group name is EXTRA_SUB_TEXT or EXTRA_CONVERSATION_TITLE.
+        setStatus("وصل إشعار واتساب؛ جارٍ التحقق من المرسل والمجموعة");
         if (!isTargetSender(title) && !isTargetSender(sub) && !isTargetSender(conversation) && !isTargetSender(body)) {
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putString("last_status", "وصل إشعار واتساب، لكن عنوانه ليس المرسل المطلوب")
-                    .apply();
+            setStatus("وصل إشعار واتساب، لكن عنوانه ليس المرسل المطلوب");
             return;
         }
 
@@ -76,13 +82,11 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         String group = groupText.contains("العمقي") ? "العمقي"
                 : (groupText.contains("بن دول") ? "بن دول » محمد علوي احمد" : "");
         if (group.isEmpty()) {
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putString("last_status", "وصلت رسالة من المرسل المطلوب، لكن اسم المجموعة غير ظاهر في الإشعار")
-                    .apply();
+            setStatus("وصلت رسالة من المرسل المطلوب، لكن اسم المجموعة غير ظاهر في الإشعار");
             return;
         }
 
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("last_status", "تم التعرف على المرسل والمجموعة: " + group).apply();
+        setStatus("تم التعرف على المرسل والمجموعة: " + group);
         processMessage(body, group, posted);
     }
 
