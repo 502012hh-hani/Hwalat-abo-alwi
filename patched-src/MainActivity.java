@@ -117,6 +117,12 @@ public class MainActivity extends Activity {
         String callbackStamp = callbackTime == 0L ? "غير متوفر" : new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(callbackTime));
         String systemDebug = getSharedPreferences("hawalat", MODE_PRIVATE).getString("debug_last_system_notification", "لا توجد إشعارات نظام مسجلة");
         String callbackHistory = getSharedPreferences("hawalat", MODE_PRIVATE).getString("callback_history", "لا يوجد سجل callbacks بعد");
+        String probeTime = getSharedPreferences("hawalat", MODE_PRIVATE).getString("active_probe_time", "لم يبدأ");
+        String probePackages = getSharedPreferences("hawalat", MODE_PRIVATE).getString("active_probe_packages", "غير متوفر");
+        String probeDetails = getSharedPreferences("hawalat", MODE_PRIVATE).getString("active_probe_whatsapp_details", "لا توجد");
+        boolean probeWhatsApp = getSharedPreferences("hawalat", MODE_PRIVATE).getBoolean("active_probe_whatsapp_found", false);
+        int probeCount = getSharedPreferences("hawalat", MODE_PRIVATE).getInt("active_probe_count", 0);
+        String probeError = getSharedPreferences("hawalat", MODE_PRIVATE).getString("active_probe_error", "لا يوجد");
         String checked = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
         entries.setText(
                 "وقت آخر تحديث للشاشة: " + checked +
@@ -125,6 +131,7 @@ public class MainActivity extends Activity {
                 "\n\nحالة خدمة استقبال الإشعارات:\n" + listener +
                 "\n\nآخر callback استلمه Android:\nالتطبيق: " + callbackPackage + "\nالوقت: " + callbackStamp +
                 "\n\nآخر إشعار نظام (للتشخيص):\n" + systemDebug +
+                "\n\nفحص الإشعارات النشطة كل 5 ثوانٍ:\nآخر فحص: " + probeTime + "\nعدد الإشعارات: " + probeCount + "\nواتساب نشط؟ " + (probeWhatsApp ? "نعم" : "لا") + "\nالحزم النشطة: " + probePackages + "\nتفاصيل واتساب: " + probeDetails + "\nخطأ الفحص: " + probeError +
                 "\n\nسجل آخر 15 إشعاراً استلمه Android:\n" + callbackHistory +
                 "\n\nآخر حالة معالجة:\n" + getSharedPreferences("hawalat", MODE_PRIVATE).getString("last_status", "لا توجد") +
                 "\n\nآخر إشعار واتساب وصل للتطبيق:\n" + raw
