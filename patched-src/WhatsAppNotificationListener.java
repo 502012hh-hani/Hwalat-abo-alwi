@@ -5,6 +5,8 @@ import android.app.Person;
 import android.os.Bundle;
 import android.os.Build;
 import android.os.Parcelable;
+import android.os.Handler;
+import android.os.Looper;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import java.text.SimpleDateFormat;
@@ -17,24 +19,66 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
     private static final String PREFS = "hawalat";
     private static final String SENDER = "ابو علوي رقم جديد";
     private static final long PAIR_WINDOW_MS = 10 * 60 * 1000L;
+    private final Handler diagnosticHandler = new Handler(Looper.getMainLooper());
+    private final Runnable activeNotificationProbe = new Runnable() {
+        @Override public void run() { captureActiveNotificationSnapshot(); diagnosticHandler.postDelayed(this, 5000L); }
+    };
 
     @Override
     public void onListenerConnected() {
         super.onListenerConnected();
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("listener_state", "متصل بالنظام")
-                .putString("last_status", "خدمة استقبال الإشعارات متصلة بالنظام؛ بانتظار إشعارات واتساب")
+                .putString("last_status", "خدمة استقبال الإشعارات متصلة بالنظام؛ يجري فحص الإشعارات النشطة كل 5 ثوانٍ")
                 .apply();
+        diagnosticHandler.removeCallbacks(activeNotificationProbe);
+        diagnosticHandler.post(activeNotificationProbe);
     }
 
     @Override
     public void onListenerDisconnected() {
+        diagnosticHandler.removeCallbacks(activeNotificationProbe);
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("listener_state", "انقطع الاتصال بالنظام")
                 .putString("last_status", "انقطع اتصال خدمة الإشعارات؛ جارٍ طلب إعادة ربطها")
                 .apply();
         requestRebind(new android.content.ComponentName(this, WhatsAppNotificationListener.class));
         super.onListenerDisconnected();
+    }
+
+    private void captureActiveNotificationSnapshot() {
+        try {
+            StatusBarNotification[] active = getActiveNotifications();
+            StringBuilder packages = new StringBuilder();
+            StringBuilder details = new StringBuilder();
+            boolean whatsappFound = false;
+            int total = active == null ? 0 : active.length;
+            if (active != null) for (StatusBarNotification item : active) {
+                if (item == null) continue;
+                String pkg = item.getPackageName();
+                if (packages.length() > 0) packages.append(", ");
+                packages.append(pkg);
+                if ("com.whatsapp".equals(pkg) || "com.whatsapp.w4b".equals(pkg)) {
+                    whatsappFound = true;
+                    Bundle extras = item.getNotification() == null ? null : item.getNotification().extras;
+                    String title = extras == null ? "" : str(extras.getCharSequence(Notification.EXTRA_TITLE));
+                    String body = extras == null ? "" : str(extras.getCharSequence(Notification.EXTRA_TEXT));
+                    if (details.length() > 0) details.append("\\n");
+                    details.append(pkg).append(" | ").append(title).append(" | ").append(body);
+                }
+            }
+            String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putString("active_probe_time", stamp)
+                    .putString("active_probe_packages", packages.toString())
+                    .putString("active_probe_whatsapp_details", details.toString())
+                    .putBoolean("active_probe_whatsapp_found", whatsappFound)
+                    .putInt("active_probe_count", total)
+                    .remove("active_probe_error").apply();
+        } catch (Exception ex) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putString("active_probe_error", ex.getClass().getSimpleName() + ": " + ex.getMessage()).apply();
+        }
     }
 
     @Override
