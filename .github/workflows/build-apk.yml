@@ -44,8 +44,39 @@ jobs:
           mkdir -p app/src/main/java/com/abualawi/hawalat
           cp patched-src/MainActivity.java app/src/main/java/com/abualawi/hawalat/MainActivity.java
           cp patched-src/WhatsAppNotificationListener.java app/src/main/java/com/abualawi/hawalat/WhatsAppNotificationListener.java
-          grep -q 'android:name=".WhatsAppNotificationListener"' app/src/main/AndroidManifest.xml
-          grep -q 'android.service.notification.NotificationListenerService' app/src/main/AndroidManifest.xml
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          p = Path("app/src/main/AndroidManifest.xml")
+          android = "{http://schemas.android.com/apk/res/android}"
+          ET.register_namespace("android", "http://schemas.android.com/apk/res/android")
+          tree = ET.parse(p)
+          root = tree.getroot()
+          app = root.find("application")
+          if app is None:
+              raise SystemExit("Manifest application element is missing")
+          service = None
+          for item in app.findall("service"):
+              name = item.get(android + "name", "")
+              if name in (".WhatsAppNotificationListener", "com.abualawi.hawalat.WhatsAppNotificationListener"):
+                  service = item
+                  break
+          if service is None:
+              service = ET.SubElement(app, "service")
+              service.set(android + "name", ".WhatsAppNotificationListener")
+          service.set(android + "permission", "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE")
+          service.set(android + "exported", "true")
+          has_action = False
+          for filt in service.findall("intent-filter"):
+              for action in filt.findall("action"):
+                  if action.get(android + "name") == "android.service.notification.NotificationListenerService":
+                      has_action = True
+          if not has_action:
+              filt = ET.SubElement(service, "intent-filter")
+              ET.SubElement(filt, "action").set(android + "name", "android.service.notification.NotificationListenerService")
+          tree.write(p, encoding="utf-8", xml_declaration=True)
+          print("Notification listener manifest declaration verified and repaired")
+          PY
           python3 - <<'PY'
           from pathlib import Path
           p = Path("app/src/main/AndroidManifest.xml")
