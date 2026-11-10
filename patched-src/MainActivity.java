@@ -147,12 +147,12 @@ public class MainActivity extends Activity {
 
     private int writeGroup(File dir, String label, String prefKey, String today) throws Exception {
         String data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
-        StringBuilder csv = new StringBuilder("\uFEFFاسم المستلم,المبلغ,التاريخ,الوقت\\r\\n");
+        StringBuilder csv = new StringBuilder("\uFEFFاسم المستلم,المبلغ,التاريخ,الوقت\r\n");
         int n = 0;
         for (String row : data.split("\\n")) {
             String[] p = row.split("\\t", -1);
             if (p.length < 4 || !today.equals(p[0])) continue;
-            csv.append(q(p[2])).append(',').append(q(p[3])).append(',').append(q(p[0])).append(',').append(q(p[1])).append("\\r\\n");
+            csv.append(q(p[2])).append(',').append(q(p[3])).append(',').append(q(p[0])).append(',').append(q(p[1])).append("\r\n");
             n++;
         }
         File f = new File(dir, label + "-" + today + ".csv");
