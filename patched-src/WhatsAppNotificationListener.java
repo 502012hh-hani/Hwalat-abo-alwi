@@ -61,7 +61,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                 if (fields.length < 4) { changed = true; continue; }
                 String name = cleanName(fields[2]);
                 String amount = normalize(fields[3]).replaceAll("[^0-9]", "");
-                if (!validName(name) || !amount.matches("[0-9]{2,8}")) {
+                if (!validName(name) || !amount.matches("[0-9]{2,7}")) {
                     changed = true;
                     continue;
                 }
@@ -361,13 +361,15 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
     private String extractAmount(String text) {
         if (text == null) return "";
         String s = normalize(text).replace("٬", "").replace(",", "").trim();
-        Matcher labeled = Pattern.compile("(?:المبلغ|مبلغ|القيمة)\\s*[:：]?\\s*([0-9]{2,8})").matcher(s);
+        // تجاهل أرقام الهاتف والحساب المسبوقة بتسميات الرقم/الحساب.
+        s = s.replaceAll("(?:رقم\\s*(?:الحساب|الهاتف|الجوال)|الرقم)\\s*[:：]?\\s*[0-9]{6,}", " ");
+        Matcher labeled = Pattern.compile("(?:المبلغ|مبلغ|القيمة)\\s*[:：]?\\s*([0-9]{2,7})").matcher(s);
         String labeledValue = "";
         while (labeled.find()) labeledValue = labeled.group(1);
         if (!labeledValue.isEmpty()) return labeledValue;
 
         // الأولوية للرقم المرتبط بعملة؛ أرقام الحسابات الطويلة لا تُقبل كمبلغ.
-        Matcher currency = Pattern.compile("([0-9]{2,8})\\s*(?:ريال(?:\\s+يمني)?|سعودي|يمني|ر\\.?س|ر\\.?ي)").matcher(s);
+        Matcher currency = Pattern.compile("([0-9]{2,7})\\s*(?:﷼|ريال(?:\\s+يمني)?|سعودي|يمني|ر\\.?س|ر\\.?ي)").matcher(s);
         String currencyValue = "";
         while (currency.find()) currencyValue = currency.group(1);
         if (!currencyValue.isEmpty()) return currencyValue;
