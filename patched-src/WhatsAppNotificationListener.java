@@ -50,12 +50,25 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         String debug = stamp + "\nالتطبيق: " + packageName + "\nالعنوان: " + title
                 + "\nالعنوان الفرعي: " + sub + "\nعنوان المحادثة: " + conversation
                 + "\nالنص: " + body;
-        android.content.SharedPreferences.Editor diagnostic = getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String oldHistory = prefs.getString("callback_history", "");
+        String historyLine = stamp + " | " + packageName + " | " + title + " | " + sub + " | " + conversation + " | " + body;
+        String history = historyLine + (oldHistory.isEmpty() ? "" : "\n" + oldHistory);
+        String[] historyLines = history.split("\n");
+        StringBuilder limitedHistory = new StringBuilder();
+        for (int i = 0; i < Math.min(historyLines.length, 15); i++) {
+            if (i > 0) limitedHistory.append("\n");
+            limitedHistory.append(historyLines[i]);
+        }
+        android.content.SharedPreferences.Editor diagnostic = prefs.edit()
                 .putString("last_callback_package", packageName)
-                .putLong("last_callback_time", posted);
+                .putLong("last_callback_time", posted)
+                .putString("callback_history", limitedHistory.toString());
         // Keep generic Android callbacks separate so Xiaomi/system notifications
         // cannot overwrite the last real WhatsApp notification shown in the UI.
-        if ("com.whatsapp".equals(packageName)) {
+        boolean whatsappPackage = "com.whatsapp".equals(packageName)
+                || "com.whatsapp.w4b".equals(packageName);
+        if (whatsappPackage) {
             diagnostic.putString("debug_last_notification", debug)
                     .putString("last_whatsapp_notification_time", stamp);
         } else {
@@ -64,7 +77,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         diagnostic.apply();
 
         // Only WhatsApp notifications are shown in the "last WhatsApp" field.
-        if (!"com.whatsapp".equals(packageName)) return;
+        if (!whatsappPackage) return;
         setStatus("وصل إشعار واتساب؛ جارٍ التحقق من المرسل والمجموعة");
         if (e == null) {
             setStatus("وصل إشعار واتساب لكن بياناته النصية غير متاحة");
