@@ -16,6 +16,25 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
     private static final long PAIR_WINDOW_MS = 10 * 60 * 1000L;
 
     @Override
+    public void onListenerConnected() {
+        super.onListenerConnected();
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString("listener_state", "متصل بالنظام")
+                .putString("last_status", "خدمة استقبال الإشعارات متصلة بالنظام؛ بانتظار إشعارات واتساب")
+                .apply();
+    }
+
+    @Override
+    public void onListenerDisconnected() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString("listener_state", "انقطع الاتصال بالنظام")
+                .putString("last_status", "انقطع اتصال خدمة الإشعارات؛ جارٍ طلب إعادة ربطها")
+                .apply();
+        requestRebind(new android.content.ComponentName(this, WhatsAppNotificationListener.class));
+        super.onListenerDisconnected();
+    }
+
+    @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
         if (sbn == null || !"com.whatsapp".equals(sbn.getPackageName())) return;
         Notification n = sbn.getNotification();
@@ -46,7 +65,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
         // In WhatsApp group notifications the sender is normally EXTRA_TITLE,
         // while the group name is EXTRA_SUB_TEXT or EXTRA_CONVERSATION_TITLE.
-        if (!isTargetSender(title) && !isTargetSender(body)) {
+        if (!isTargetSender(title) && !isTargetSender(sub) && !isTargetSender(conversation) && !isTargetSender(body)) {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                     .putString("last_status", "وصل إشعار واتساب، لكن عنوانه ليس المرسل المطلوب")
                     .apply();
@@ -63,6 +82,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             return;
         }
 
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("last_status", "تم التعرف على المرسل والمجموعة: " + group).apply();
         processMessage(body, group, posted);
     }
 
