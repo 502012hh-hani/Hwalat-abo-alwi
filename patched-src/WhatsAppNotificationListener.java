@@ -395,7 +395,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         if (words.length < 2) return false;
         String lower = normalizeArabic(v);
         String[] reject = {"السلام", "صباح", "مساء", "شكرا", "تم", "مرفق", "يرجى",
-                "الرجاء", "ابو", "علوي", "رقم", "حساب", "العمقي", "بن", "دول",
+                "الرجاء", "رقم", "حساب", "دول",
                 "ريال", "سعودي", "يمني", "حواله", "حوالة", "حوله", "تحويل",
                 "ايداع", "المبلغ", "مبلغ", "اليوم", "معه", "في"};
         for (String token : words) {
