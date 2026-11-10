@@ -59,14 +59,19 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                 if (packages.length() > 0) packages.append(", ");
                 packages.append(pkg);
                 if ("com.whatsapp".equals(pkg) || "com.whatsapp.w4b".equals(pkg)) {
-                    whatsappFound = true;
                     Bundle extras = item.getNotification() == null ? null : item.getNotification().extras;
                     String title = extras == null ? "" : str(extras.getCharSequence(Notification.EXTRA_TITLE));
-                    String body = extras == null ? "" : str(extras.getCharSequence(Notification.EXTRA_TEXT));
-                    if (details.length() > 0) details.append("\\n");
-                    details.append(pkg).append(" | ").append(title).append(" | ").append(body);
-                    // Seed existing notifications once; process only later changes.
-                    processIfActiveNotificationChanged(item);
+                    String sub = extras == null ? "" : str(extras.getCharSequence(Notification.EXTRA_SUB_TEXT));
+                    String conversation = extras == null ? "" : str(extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE));
+                    // لا نعرض ولا نفحص إلا إشعارات المجموعتين المطلوبتين.
+                    if (!isTargetGroup(title + " " + sub + " " + conversation).isEmpty()) {
+                        whatsappFound = true;
+                        String body = extras == null ? "" : str(extras.getCharSequence(Notification.EXTRA_TEXT));
+                        if (details.length() > 0) details.append("\\n");
+                        details.append(pkg).append(" | ").append(title).append(" | ").append(body);
+                        // Seed existing target-group notifications once; process only later changes.
+                        processIfActiveNotificationChanged(item);
+                    }
                 }
             }
             String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
@@ -122,6 +127,11 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         String conversation = e == null ? "" : str(e.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE));
         String big = e == null ? "" : str(e.getCharSequence(Notification.EXTRA_BIG_TEXT));
         String body = e == null ? "" : (big.isEmpty() ? str(e.getCharSequence(Notification.EXTRA_TEXT)) : big);
+        boolean whatsappPackage = "com.whatsapp".equals(packageName)
+                || "com.whatsapp.w4b".equals(packageName);
+        String group = isTargetGroup(title + " " + sub + " " + conversation);
+        // تجاهل أي إشعار ليس من واتساب أو ليس من إحدى المجموعتين المستهدفتين.
+        if (!whatsappPackage || group.isEmpty()) return;
 
         // WhatsApp group messages are commonly delivered as MessagingStyle.
         // Their actual author and text live in EXTRA_MESSAGES, not necessarily
@@ -176,8 +186,6 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                     .putLong("last_callback_time", posted)
                     .putString("callback_history", limitedHistory.toString());
         }
-        boolean whatsappPackage = "com.whatsapp".equals(packageName)
-                || "com.whatsapp.w4b".equals(packageName);
         if (whatsappPackage) {
             diagnostic.putString("debug_last_notification", debug)
                     .putString("last_whatsapp_notification_time", stamp);
@@ -210,18 +218,15 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             return;
         }
 
-        // Group identity comes from conversation metadata; never infer it from
-        // the transfer body, which may contain only the recipient and amount.
-        String groupText = sub + " " + conversation + " " + title;
-        String group = groupText.contains("العمقي") ? "العمقي"
-                : (groupText.contains("بن دول") ? "بن دول » محمد علوي احمد" : "");
-        if (group.isEmpty()) {
-            setStatus("وصلت رسالة من المرسل المطلوب، لكن اسم المجموعة غير ظاهر في الإشعار");
-            return;
-        }
-
         setStatus("تم التعرف على المرسل والمجموعة: " + group);
         processMessage(body, group, posted);
+    }
+
+    private String isTargetGroup(String value) {
+        if (value == null) return "";
+        if (value.contains("العمقي")) return "العمقي";
+        if (value.contains("بن دول") || value.contains("محمد علوي احمد")) return "بن دول » محمد علوي احمد";
+        return "";
     }
 
     private boolean isTargetSender(String value) {
