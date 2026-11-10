@@ -116,6 +116,7 @@ public class MainActivity extends Activity {
         long callbackTime = getSharedPreferences("hawalat", MODE_PRIVATE).getLong("last_callback_time", 0L);
         String callbackStamp = callbackTime == 0L ? "غير متوفر" : new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(callbackTime));
         String systemDebug = getSharedPreferences("hawalat", MODE_PRIVATE).getString("debug_last_system_notification", "لا توجد إشعارات نظام مسجلة");
+        String callbackHistory = getSharedPreferences("hawalat", MODE_PRIVATE).getString("callback_history", "لا يوجد سجل callbacks بعد");
         String checked = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
         entries.setText(
                 "وقت آخر تحديث للشاشة: " + checked +
@@ -124,6 +125,7 @@ public class MainActivity extends Activity {
                 "\n\nحالة خدمة استقبال الإشعارات:\n" + listener +
                 "\n\nآخر callback استلمه Android:\nالتطبيق: " + callbackPackage + "\nالوقت: " + callbackStamp +
                 "\n\nآخر إشعار نظام (للتشخيص):\n" + systemDebug +
+                "\n\nسجل آخر 15 إشعاراً استلمه Android:\n" + callbackHistory +
                 "\n\nآخر حالة معالجة:\n" + getSharedPreferences("hawalat", MODE_PRIVATE).getString("last_status", "لا توجد") +
                 "\n\nآخر إشعار واتساب وصل للتطبيق:\n" + raw
         );
