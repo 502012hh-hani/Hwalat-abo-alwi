@@ -374,10 +374,12 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         while (currency.find()) currencyValue = currency.group(1);
         if (!currencyValue.isEmpty()) return currencyValue;
 
-        // في الرسالة المقسمة قد يصل المبلغ وحده في سطر رقمي قصير.
+        // استخرج الرقم القصير من سطر مستقل حتى لو تبعه رمز عملة أو كلمة؛ لا نسجل العملة.
+        // لا نقبل أرقام الحسابات/الهاتف الطويلة أو الأرقام الملتصقة بكلمات مثل "الرقم".
         for (String line : s.split("[\\r\\n]+")) {
             String value = line.trim();
-            if (value.matches("[0-9]{2,7}")) return value;
+            Matcher standalone = Pattern.compile("^([0-9]{2,7})(?:\\\\s+.*)?$").matcher(value);
+            if (standalone.matches()) return standalone.group(1);
         }
         return "";
     }
