@@ -2,6 +2,9 @@ package com.abualawi.hawalat;
 
 import android.app.Notification;
 import android.os.Bundle;
+import android.os.Build;
+import android.app.Person;
+import android.os.Parcelable;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import java.text.SimpleDateFormat;
@@ -45,6 +48,63 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         String conversation = e == null ? "" : str(e.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE));
         String big = e == null ? "" : str(e.getCharSequence(Notification.EXTRA_BIG_TEXT));
         String body = e == null ? "" : (big.isEmpty() ? str(e.getCharSequence(Notification.EXTRA_TEXT)) : big);
+
+        // WhatsApp group messages are commonly delivered as MessagingStyle.
+        // Their actual author and text live in EXTRA_MESSAGES, not necessarily
+        // in EXTRA_TITLE / EXTRA_TEXT. Read those structured messages first.
+        boolean structuredSenderMatched = false;
+        StringBuilder structuredBody = new StringBuilder();
+        if (e != null) {
+            Parcelable[] rawMessages = e.getParcelableArray(Notification.EXTRA_MESSAGES);
+            if (rawMessages != null) {
+                for (Parcelable item : rawMessages) {
+                    if (!(item instanceof Bundle)) continue;
+                    Bundle message = (Bundle) item;
+                    String messageText = str(message.getCharSequence("text"));
+                    String messageSender = str(message.getCharSequence("sender"));
+                    if (Build.VERSION.SDK_INT >= 28) {
+                        try {
+                            Person person = message.getParcelable("sender_person");
+                            if (person != null && person.getName() != null) {
+                                messageSender = person.getName().toString();
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                    if (!messageText.isEmpty() && isTargetSender(messageSender)) {
+                        structuredSenderMatched = true;
+                        if (structuredBody.length() > 0) structuredBody.append("\\n");
+                        structuredBody.append(messageText);
+                    }
+                }
+            }
+        }
+        if (!structuredSenderMatched && Build.VERSION.SDK_INT >= 24 && n != null) {
+            try {
+                Notification.MessagingStyle style =
+                        Notification.MessagingStyle.extractMessagingStyleFromNotification(n);
+                if (style != null && style.getMessages() != null) {
+                    for (Notification.MessagingStyle.Message message : style.getMessages()) {
+                        String messageSender = "";
+                        if (Build.VERSION.SDK_INT >= 28) {
+                            Person person = message.getSenderPerson();
+                            if (person != null && person.getName() != null) {
+                                messageSender = person.getName().toString();
+                            }
+                        } else if (message.getSender() != null) {
+                            messageSender = message.getSender().toString();
+                        }
+                        String messageText = str(message.getText());
+                        if (!messageText.isEmpty() && isTargetSender(messageSender)) {
+                            structuredSenderMatched = true;
+                            if (structuredBody.length() > 0) structuredBody.append("\\n");
+                            structuredBody.append(messageText);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        if (structuredSenderMatched) body = structuredBody.toString();
+
         long posted = sbn.getPostTime();
         String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(posted));
         String debug = stamp + "\nالتطبيق: " + packageName + "\nالعنوان: " + title
@@ -93,12 +153,16 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         }
 
         setStatus("وصل إشعار واتساب؛ جارٍ التحقق من المرسل والمجموعة");
-        if (!isTargetSender(title) && !isTargetSender(sub) && !isTargetSender(conversation) && !isTargetSender(body)) {
-            setStatus("وصل إشعار واتساب، لكن عنوانه ليس المرسل المطلوب");
+        boolean legacySenderMatched = isTargetSender(title) || isTargetSender(sub)
+                || isTargetSender(conversation) || isTargetSender(body);
+        if (!structuredSenderMatched && !legacySenderMatched) {
+            setStatus("وصل إشعار واتساب، لكن لم يظهر اسم المرسل المطلوب في بيانات الإشعار");
             return;
         }
 
-        String groupText = sub + " " + conversation + " " + title + " " + body;
+        // Group identity comes from conversation metadata; never infer it from
+        // the transfer body, which may contain only the recipient and amount.
+        String groupText = sub + " " + conversation + " " + title;
         String group = groupText.contains("العمقي") ? "العمقي"
                 : (groupText.contains("بن دول") ? "بن دول » محمد علوي احمد" : "");
         if (group.isEmpty()) {
