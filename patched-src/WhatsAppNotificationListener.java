@@ -164,6 +164,11 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         }
         if (structuredSenderMatched) body = structuredBody.toString();
 
+        // لا نسجل حتى إشعارات المجموعة إلا إذا كان المرسل هو أبو علوي المطلوب.
+        boolean legacySenderMatched = isTargetSender(title) || isTargetSender(sub)
+                || isTargetSender(conversation) || isTargetSender(body);
+        if (!structuredSenderMatched && !legacySenderMatched) return;
+
         long posted = sbn.getPostTime();
         String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(posted));
         String debug = stamp + "\nالتطبيق: " + packageName + "\nالعنوان: " + title
@@ -211,13 +216,6 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         }
 
         setStatus("وصل إشعار واتساب؛ جارٍ التحقق من المرسل والمجموعة");
-        boolean legacySenderMatched = isTargetSender(title) || isTargetSender(sub)
-                || isTargetSender(conversation) || isTargetSender(body);
-        if (!structuredSenderMatched && !legacySenderMatched) {
-            setStatus("وصل إشعار واتساب، لكن لم يظهر اسم المرسل المطلوب في بيانات الإشعار");
-            return;
-        }
-
         setStatus("تم التعرف على المرسل والمجموعة: " + group);
         processMessage(body, group, posted);
     }
