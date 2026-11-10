@@ -133,9 +133,27 @@ public class MainActivity extends Activity {
                 "\n\nآخر إشعار نظام (للتشخيص):\n" + systemDebug +
                 "\n\nفحص الإشعارات النشطة كل 5 ثوانٍ:\nآخر فحص: " + probeTime + "\nعدد الإشعارات: " + probeCount + "\nواتساب نشط؟ " + (probeWhatsApp ? "نعم" : "لا") + "\nالحزم النشطة: " + probePackages + "\nتفاصيل واتساب: " + probeDetails + "\nخطأ الفحص: " + probeError +
                 "\n\nسجل آخر 15 إشعاراً استلمه Android:\n" + callbackHistory +
+                "\n\nتفاصيل سجلات مجموعة العمقي:\n" + formatEntries(a) +
+                "\n\nتفاصيل سجلات مجموعة بن دول:\n" + formatEntries(b) +
                 "\n\nآخر حالة معالجة:\n" + getSharedPreferences("hawalat", MODE_PRIVATE).getString("last_status", "لا توجد") +
                 "\n\nآخر إشعار واتساب وصل للتطبيق:\n" + raw
         );
+    }
+
+    private String formatEntries(String data) {
+        if (TextUtils.isEmpty(data)) return "لا توجد حوالات مسجلة حتى الآن.";
+        StringBuilder out = new StringBuilder();
+        String[] rows = data.split("\\n");
+        for (int i = 0; i < rows.length; i++) {
+            String[] p = rows[i].split("\\t", -1);
+            if (p.length >= 4) {
+                out.append(i + 1).append(") اسم المستلم: ").append(p[2])
+                   .append("\\n   المبلغ: ").append(p[3])
+                   .append("\\n   التاريخ: ").append(p[0])
+                   .append("\\n   الوقت: ").append(p[1]).append("\\n\\n");
+            }
+        }
+        return out.length() == 0 ? "لا توجد حوالات مكتملة؛ قد تكون هناك رسالة بانتظار الجزء الآخر." : out.toString();
     }
 
     private int count(String s) {
