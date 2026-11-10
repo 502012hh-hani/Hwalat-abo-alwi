@@ -2,8 +2,6 @@ package com.abualawi.hawalat;
 
 import android.app.Notification;
 import android.os.Bundle;
-import android.os.Build;
-import android.app.Person;
 import android.os.Parcelable;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
@@ -77,31 +75,6 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                     }
                 }
             }
-        }
-        if (!structuredSenderMatched && Build.VERSION.SDK_INT >= 24 && n != null) {
-            try {
-                Notification.MessagingStyle style =
-                        Notification.MessagingStyle.extractMessagingStyleFromNotification(n);
-                if (style != null && style.getMessages() != null) {
-                    for (Notification.MessagingStyle.Message message : style.getMessages()) {
-                        String messageSender = "";
-                        if (Build.VERSION.SDK_INT >= 28) {
-                            Person person = message.getSenderPerson();
-                            if (person != null && person.getName() != null) {
-                                messageSender = person.getName().toString();
-                            }
-                        } else if (message.getSender() != null) {
-                            messageSender = message.getSender().toString();
-                        }
-                        String messageText = str(message.getText());
-                        if (!messageText.isEmpty() && isTargetSender(messageSender)) {
-                            structuredSenderMatched = true;
-                            if (structuredBody.length() > 0) structuredBody.append("\\n");
-                            structuredBody.append(messageText);
-                        }
-                    }
-                }
-            } catch (Exception ignored) {}
         }
         if (structuredSenderMatched) body = structuredBody.toString();
 
