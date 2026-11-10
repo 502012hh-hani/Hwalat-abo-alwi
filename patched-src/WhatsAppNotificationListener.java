@@ -56,8 +56,6 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             if (active != null) for (StatusBarNotification item : active) {
                 if (item == null) continue;
                 String pkg = item.getPackageName();
-                if (packages.length() > 0) packages.append(", ");
-                packages.append(pkg);
                 if ("com.whatsapp".equals(pkg) || "com.whatsapp.w4b".equals(pkg)) {
                     Bundle extras = item.getNotification() == null ? null : item.getNotification().extras;
                     String title = extras == null ? "" : str(extras.getCharSequence(Notification.EXTRA_TITLE));
@@ -65,6 +63,8 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                     String conversation = extras == null ? "" : str(extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE));
                     // لا نعرض ولا نفحص إلا إشعارات المجموعتين المطلوبتين.
                     if (!isTargetGroup(title + " " + sub + " " + conversation).isEmpty()) {
+                        if (packages.length() > 0) packages.append(", ");
+                        packages.append(pkg);
                         whatsappFound = true;
                         String body = extras == null ? "" : str(extras.getCharSequence(Notification.EXTRA_TEXT));
                         if (details.length() > 0) details.append("\\n");
