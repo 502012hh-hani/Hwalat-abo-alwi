@@ -156,7 +156,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                     }
                     if (!messageText.isEmpty() && isTargetSender(messageSender)) {
                         structuredSenderMatched = true;
-                        if (structuredBody.length() > 0) structuredBody.append("\\n");
+                        if (structuredBody.length() > 0) structuredBody.append("\n");
                         structuredBody.append(messageText);
                     }
                 }
@@ -248,68 +248,59 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             return;
         }
 
+        // بعض إصدارات واتساب تمرر فواصل الأسطر كنص حرفي "\\n".
+        String cleanBody = stripSenderPrefix(body).replace("\\\\n", "\n")
+                .replace('\u200f', ' ').replace('\u200e', ' ').replace('\uFEFF', ' ');
+        String name = extractName(cleanBody);
+        String amount = extractAmount(cleanBody);
         String pendingKey = "pending_" + group;
-        String pending = getSharedPreferences(PREFS, MODE_PRIVATE).getString(pendingKey, "");
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String pending = prefs.getString(pendingKey, "");
         String pendingName = "";
         String pendingAmount = "";
         long pendingTime = 0L;
         String[] saved = pending.split("\\t", -1);
         if (saved.length >= 3) {
             try { pendingTime = Long.parseLong(saved[0]); } catch (Exception ignored) {}
-            if (pendingTime > 0 && posted >= pendingTime && posted - pendingTime <= PAIR_WINDOW_MS) {
+            if (pendingTime <= 0 || posted < pendingTime || posted - pendingTime > PAIR_WINDOW_MS) {
+                prefs.edit().remove(pendingKey).apply();
+                pendingName = "";
+                pendingAmount = "";
+                pendingTime = 0L;
+            } else {
                 pendingName = saved[1];
                 pendingAmount = saved[2];
-            } else if (!pending.isEmpty()) {
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(pendingKey).apply();
-                pendingTime = 0L;
             }
         }
 
-        String cleanBody = stripSenderPrefix(body);
-        String name = "";
-        String amount = "";
-        String[] messageLines = cleanBody.split("[\\r\\n]+");
-        for (String rawLine : messageLines) {
-            String line = rawLine.trim();
-            if (line.isEmpty()) continue;
-            String lineAmount = extractAmount(line);
-            String lineName = extractName(line);
-            if (!lineName.isEmpty()) name = lineName;
-            if (!lineAmount.isEmpty()) amount = lineAmount;
-        }
-
-        // Also handle a combined message where the recipient and amount share a line.
-        if (name.isEmpty()) name = extractName(cleanBody);
-        if (amount.isEmpty()) amount = extractAmount(cleanBody);
-
-        // Do not silently combine two different recipient-name fragments or two
-        // amount fragments. Keep the newest fragment and wait for its counterpart.
-        if (!name.isEmpty() && !pendingName.isEmpty() && pendingAmount.isEmpty()) {
-            pendingName = "";
-            pendingTime = 0L;
-        }
-        if (!amount.isEmpty() && !pendingAmount.isEmpty() && pendingName.isEmpty()) {
-            pendingAmount = "";
-            pendingTime = 0L;
-        }
-        if (!name.isEmpty()) pendingName = name;
-        if (!amount.isEmpty()) pendingAmount = amount;
-
-        if (!pendingName.isEmpty() && !pendingAmount.isEmpty()) {
-            long transferTime = pendingTime > 0 ? pendingTime : posted;
-            saveTransfer(group, pendingName, pendingAmount, transferTime);
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(pendingKey).apply();
+        // إذا وصل الاسم والمبلغ معاً في الرسالة نفسها، لا نخلطهما مع جزء قديم.
+        if (!name.isEmpty() && !amount.isEmpty()) {
+            saveTransfer(group, name, amount, posted);
+            prefs.edit().remove(pendingKey).apply();
             return;
         }
 
-        if (!pendingName.isEmpty() || !pendingAmount.isEmpty()) {
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putString(pendingKey, posted + "\t" + pendingName + "\t" + pendingAmount)
+        // الرسائل المقسمة: نكمل فقط الجزء الناقص خلال عشر دقائق.
+        if (!name.isEmpty() && pendingName.isEmpty() && !pendingAmount.isEmpty()) {
+            saveTransfer(group, name, pendingAmount, pendingTime);
+            prefs.edit().remove(pendingKey).apply();
+            return;
+        }
+        if (!amount.isEmpty() && pendingAmount.isEmpty() && !pendingName.isEmpty()) {
+            saveTransfer(group, pendingName, amount, pendingTime);
+            prefs.edit().remove(pendingKey).apply();
+            return;
+        }
+
+        if (!name.isEmpty() || !amount.isEmpty()) {
+            // جزء جديد من نفس النوع يستبدل الجزء السابق بدلاً من دمج اسمين أو مبلغين.
+            prefs.edit().putString(pendingKey, posted + "\t" + name + "\t" + amount)
                     .putString("last_status", "تم حفظ جزء من حوالة من " + group
                             + "؛ ننتظر الجزء المكمل خلال 10 دقائق")
                     .apply();
         } else {
-            setStatus("وصلت رسالة من المرسل المطلوب في " + group + " لكن لم أتعرف بعد على اسم أو مبلغ");
+            setStatus("وصلت رسالة من المرسل المطلوب في " + group
+                    + " لكن لم أتعرف على اسم مستلم أو مبلغ صالح؛ تم تجاهل أرقام الحساب وعبارات الحساب");
         }
     }
 
@@ -342,43 +333,74 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         if (text == null) return "";
         String s = normalize(text).replace("٬", "").replace(",", "").trim();
         Matcher labeled = Pattern.compile("(?:المبلغ|مبلغ|القيمة)\\s*[:：]?\\s*([0-9]{2,8})").matcher(s);
-        if (labeled.find()) return labeled.group(1);
-        Matcher currency = Pattern.compile("([0-9]{2,8})\\s*(?:ريال|سعودي|يمني|ر\\.?س|ر\\.?ي)").matcher(s);
-        if (currency.find()) return currency.group(1);
-        // A short, numeric-only notification line is commonly the second half of a transfer.
-        if (s.matches("[0-9]{2,8}")) return s;
+        String labeledValue = "";
+        while (labeled.find()) labeledValue = labeled.group(1);
+        if (!labeledValue.isEmpty()) return labeledValue;
+
+        // الأولوية للرقم المرتبط بعملة؛ أرقام الحسابات الطويلة لا تُقبل كمبلغ.
+        Matcher currency = Pattern.compile("([0-9]{2,8})\\s*(?:ريال(?:\\s+يمني)?|سعودي|يمني|ر\\.?س|ر\\.?ي)").matcher(s);
+        String currencyValue = "";
+        while (currency.find()) currencyValue = currency.group(1);
+        if (!currencyValue.isEmpty()) return currencyValue;
+
+        // في الرسالة المقسمة قد يصل المبلغ وحده في سطر رقمي قصير.
+        for (String line : s.split("[\\r\\n]+")) {
+            String value = line.trim();
+            if (value.matches("[0-9]{2,7}")) return value;
+        }
         return "";
     }
 
     private String extractName(String text) {
         if (text == null) return "";
-        String s = normalize(text).trim();
+        String s = normalize(text).replace("\\\\n", "\n");
         Matcher labeled = Pattern.compile("(?:اسم\\s*المستلم|المستلم|مستلم|الاسم|الإسم|باسم)\\s*[:：/\\-]?\\s*([^\\n\\r]+)").matcher(s);
-        if (labeled.find()) {
+        while (labeled.find()) {
             String candidate = cleanName(labeled.group(1));
             if (validName(candidate)) return candidate;
         }
+
+        String best = "";
+        int bestScore = -1;
         for (String line : s.split("[\\r\\n]+")) {
             String candidate = cleanName(line);
-            if (validName(candidate)) return candidate;
+            if (!validName(candidate)) continue;
+            int words = candidate.split("\\s+").length;
+            int score = words * 100 + candidate.length();
+            if (score > bestScore) {
+                best = candidate;
+                bestScore = score;
+            }
         }
-        return "";
+        return best;
     }
 
     private String cleanName(String value) {
-        return value.replaceAll("[0-9٠-٩۰-۹].*$", " ")
-                .replaceAll("(?i)ريال سعودي|ريال|سعودي|يمني|صافي|المبلغ|مبلغ|المرسل|حوالة|حواله", " ")
-                .replaceAll("[،,؛;:：/|]+", " ").replaceAll("\\s+", " ").trim();
+        if (value == null) return "";
+        String s = normalize(value).replace('\u200f', ' ').replace('\u200e', ' ')
+                .replace('\uFEFF', ' ').replaceAll("[0-9٠-٩۰-۹].*$", " ");
+        // احذف تعليمات التحويل وبيانات الحساب قبل تقييم الاسم.
+        s = s.replaceAll("(?:رقم\\s*)?حساب(?:ي)?(?:\\s+العمقي|\\s+بن\\s*دول)?", " ")
+             .replaceAll("(?i)ريال\\s*سعودي|ريال|سعودي|يمني|صافي|المبلغ|مبلغ|المرسل", " ")
+             .replaceAll("حوالة|حواله|حوله|تحويل|ايداع|إيداع|إيداعه|في\\s+الحساب|بالحساب|الحساب|رقم|رس", " ")
+             .replaceAll("[^\\p{IsArabic}\\s]", " ")
+             .replaceAll("\\s+", " ").trim();
+        return s;
     }
 
     private boolean validName(String value) {
-        if (value == null || value.length() < 5 || value.matches(".*[0-9].*")) return false;
+        if (value == null || value.length() < 7 || value.matches(".*[0-9].*")) return false;
         String v = value.replaceAll("\\s+", " ").trim();
-        if (v.split(" ").length < 2) return false;
-        String lower = v.toLowerCase(Locale.ROOT);
-        String[] reject = {"السلام", "صباح", "مساء", "شكرا", "شكرًا", "تم", "مرفق", "يرجى", "الرجاء", "ابو علوي"};
+        String[] words = v.split(" ");
+        if (words.length < 2) return false;
+        String lower = normalizeArabic(v);
+        String[] reject = {"السلام", "صباح", "مساء", "شكرا", "تم", "مرفق", "يرجى",
+                "الرجاء", "ابو علوي", "رقم", "حساب", "العمقي", "بن دول", "ريال",
+                "سعودي", "يمني", "حواله", "حوالة", "حوله", "تحويل", "ايداع",
+                "ايداعه", "المبلغ", "مبلغ", "اليوم", "معه", "في"};
         for (String word : reject) if (lower.contains(word)) return false;
-        return v.matches(".*[\\p{IsArabic}].*");
+        int arabicLetters = v.replaceAll("[^\\p{IsArabic}]", "").length();
+        return arabicLetters >= 6 && v.matches(".*[\\p{IsArabic}].*");
     }
 
     private static String normalize(String s) {
