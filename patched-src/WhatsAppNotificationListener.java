@@ -249,7 +249,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         }
 
         // بعض إصدارات واتساب تمرر فواصل الأسطر كنص حرفي "\\n".
-        String cleanBody = stripSenderPrefix(body).replace("\\\\n", "\n")
+        String cleanBody = stripSenderPrefix(body).replace("\\n", "\n")
                 .replace('\u200f', ' ').replace('\u200e', ' ').replace('\uFEFF', ' ');
         String name = extractName(cleanBody);
         String amount = extractAmount(cleanBody);
@@ -382,7 +382,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         // احذف تعليمات التحويل وبيانات الحساب قبل تقييم الاسم.
         s = s.replaceAll("(?:رقم\\s*)?حساب(?:ي)?(?:\\s+العمقي|\\s+بن\\s*دول)?", " ")
              .replaceAll("(?i)ريال\\s*سعودي|ريال|سعودي|يمني|صافي|المبلغ|مبلغ|المرسل", " ")
-             .replaceAll("حوالة|حواله|حوله|تحويل|ايداع|إيداع|إيداعه|في\\s+الحساب|بالحساب|الحساب|رقم|رس", " ")
+             .replaceAll("حوالة|حواله|حوله|تحويل|ايداع|إيداع|إيداعه|في\\s+الحساب|بالحساب|الحساب|رقم", " ")
              .replaceAll("[^\\p{IsArabic}\\s]", " ")
              .replaceAll("\\s+", " ").trim();
         return s;
@@ -395,10 +395,16 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         if (words.length < 2) return false;
         String lower = normalizeArabic(v);
         String[] reject = {"السلام", "صباح", "مساء", "شكرا", "تم", "مرفق", "يرجى",
-                "الرجاء", "ابو علوي", "رقم", "حساب", "العمقي", "بن دول", "ريال",
-                "سعودي", "يمني", "حواله", "حوالة", "حوله", "تحويل", "ايداع",
-                "ايداعه", "المبلغ", "مبلغ", "اليوم", "معه", "في"};
-        for (String word : reject) if (lower.contains(word)) return false;
+                "الرجاء", "ابو", "علوي", "رقم", "حساب", "العمقي", "بن", "دول",
+                "ريال", "سعودي", "يمني", "حواله", "حوالة", "حوله", "تحويل",
+                "ايداع", "المبلغ", "مبلغ", "اليوم", "معه", "في"};
+        for (String token : words) {
+            String normalizedToken = normalizeArabic(token);
+            for (String blocked : reject) {
+                if (normalizedToken.equals(blocked)) return false;
+            }
+        }
+        if (lower.contains("ابو علوي")) return false;
         int arabicLetters = v.replaceAll("[^\\p{IsArabic}]", "").length();
         return arabicLetters >= 6 && v.matches(".*[\\p{IsArabic}].*");
     }
