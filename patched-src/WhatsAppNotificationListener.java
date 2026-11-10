@@ -27,6 +27,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
     @Override
     public void onListenerConnected() {
         super.onListenerConnected();
+        cleanStoredRows();
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("listener_state", "متصل بالنظام")
                 .putString("last_status", "خدمة استقبال الإشعارات متصلة بالنظام؛ يجري فحص الإشعارات النشطة كل 5 ثوانٍ")
@@ -44,6 +45,34 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                 .apply();
         requestRebind(new android.content.ComponentName(this, WhatsAppNotificationListener.class));
         super.onListenerDisconnected();
+    }
+
+    // Remove malformed legacy rows created by earlier extraction versions.
+    private void cleanStoredRows() {
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        android.content.SharedPreferences.Editor edit = prefs.edit();
+        String[] keys = {"rows_العمقي", "rows_بن دول » محمد علوي احمد"};
+        boolean changed = false;
+        for (String key : keys) {
+            String old = prefs.getString(key, "");
+            StringBuilder kept = new StringBuilder();
+            for (String row : old.split("\\n")) {
+                String[] fields = row.split("\\t", -1);
+                if (fields.length < 4) { changed = true; continue; }
+                String name = cleanName(fields[2]);
+                String amount = normalize(fields[3]).replaceAll("[^0-9]", "");
+                if (!validName(name) || !amount.matches("[0-9]{2,8}")) {
+                    changed = true;
+                    continue;
+                }
+                String cleaned = fields[0] + "\t" + fields[1] + "\t" + name + "\t" + amount;
+                if (kept.length() > 0) kept.append("\n");
+                kept.append(cleaned);
+                if (!name.equals(fields[2]) || !amount.equals(fields[3])) changed = true;
+            }
+            if (changed) edit.putString(key, kept.toString());
+        }
+        if (changed) edit.putString("last_status", "تم تنظيف السجلات القديمة من عبارات الحساب وأرقام الحسابات والأسماء غير الصالحة").apply();
     }
 
     private void captureActiveNotificationSnapshot() {
