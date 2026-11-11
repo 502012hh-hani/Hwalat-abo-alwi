@@ -209,7 +209,7 @@ public class MainActivity extends Activity {
             if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد التصدير");
             String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
             int n = writeGroup(dir, label, prefKey, today);
-            Toast.makeText(this, "تم تصدير " + n + " سجل إلى Documents/حوالات أبو علوي", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "تم تصدير " + n + " سجل إلى Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
         } catch (Exception ex) {
             Toast.makeText(this, "تعذر التصدير: " + ex.getMessage(), Toast.LENGTH_LONG).show();
         }
@@ -248,11 +248,11 @@ public class MainActivity extends Activity {
                     throw new Exception("التخزين الخارجي غير متاح");
                 }
                 File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "حوالات أبو علوي");
-                if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد Documents؛ تحقق من مساحة التخزين");
+                if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد Download؛ تحقق من مساحة التخزين");
                 total = writeGroup(dir, "العمقي", "rows_العمقي", today)
                         + writeGroup(dir, "بن دول", "rows_بن دول » محمد علوي احمد", today);
             }
-            Toast.makeText(this, "تم تصدير " + total + " سجل. افتح مجلد Documents/حوالات أبو علوي", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "تم تصدير " + total + " سجل. افتح مجلد Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
         } catch (Exception ex) {
             String reason = ex.getMessage();
             if (reason == null || reason.trim().isEmpty()) reason = ex.getClass().getSimpleName();
@@ -275,10 +275,10 @@ public class MainActivity extends Activity {
         values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
         values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/csv");
         values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
-                Environment.DIRECTORY_DOCUMENTS + "/حوالات أبو علوي");
+                Environment.DIRECTORY_DOWNLOADS + "/حوالات أبو علوي");
         values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1);
         android.net.Uri uri = getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-        if (uri == null) throw new Exception("تعذر إنشاء ملف " + fileName + " في Documents");
+        if (uri == null) throw new Exception("تعذر إنشاء ملف " + fileName + " في Download");
         try {
             java.io.OutputStream out = getContentResolver().openOutputStream(uri);
             if (out == null) throw new Exception("تعذر فتح ملف " + fileName + " للكتابة");
