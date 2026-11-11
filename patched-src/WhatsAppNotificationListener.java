@@ -56,6 +56,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         for (String key : keys) {
             String old = prefs.getString(key, "");
             StringBuilder kept = new StringBuilder();
+            java.util.HashSet<String> seenRows = new java.util.HashSet<>();
             for (String row : old.split("\\n")) {
                 String[] fields = row.split("\\t", -1);
                 if (fields.length < 4) { changed = true; continue; }
@@ -66,6 +67,9 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                     continue;
                 }
                 String cleaned = fields[0] + "\t" + fields[1] + "\t" + name + "\t" + amount;
+                // Exact same timestamp + recipient + amount is a reposted notification,
+                // not a second transfer. Keep legitimate repeated transfers at different times.
+                if (!seenRows.add(cleaned)) { changed = true; continue; }
                 if (kept.length() > 0) kept.append("\n");
                 kept.append(cleaned);
                 if (!name.equals(fields[2]) || !amount.equals(fields[3])) changed = true;
@@ -257,10 +261,10 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         if (structuredSenderMatched && !structuredTexts.isEmpty()) {
             // عالج كل رسالة أصلية من أبو علوي وحدها؛ لا تدمج أسماء ومبالغ رسائل مختلفة.
             for (int i = 0; i < structuredTexts.size(); i++) {
-                processMessage(structuredTexts.get(i), group, structuredTimes.get(i));
+                processMessageOnce(structuredTexts.get(i), group, structuredTimes.get(i));
             }
         } else {
-            processMessage(body, group, posted);
+            processMessageOnce(body, group, posted);
         }
     }
 
@@ -284,6 +288,18 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         // Group notifications may prepend the sender name to the message body.
         s = s.replaceAll("ابو\\s*علوي\\s*رقم\\s*جديد\\s*[:：،\\-]?\\s*", "");
         return s.trim();
+    }
+
+    // Prevent the same WhatsApp MessagingStyle history item from being saved again
+    // when WhatsApp reposts an updated notification containing older messages.
+    private void processMessageOnce(String body, String group, long posted) {
+        String signature = group + "|" + posted + "|" + (body == null ? "" : body.trim());
+        String key = "processed_message_" + Integer.toHexString(signature.hashCode());
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String previous = prefs.getString(key, "");
+        if (signature.equals(previous)) return;
+        prefs.edit().putString(key, signature).apply();
+        processMessage(body, group, posted);
     }
 
     private void processMessage(String body, String group, long posted) {
