@@ -327,6 +327,24 @@ public class MainActivity extends Activity {
                 }
             }
 
+            // Fallback: some Android 10/MIUI MediaStore providers return no row
+            // when RELATIVE_PATH is included in the selection. Find the exact daily
+            // filename in Downloads before attempting a second INSERT.
+            if (exactFile == null) {
+                String exactSelection = MediaStore.MediaColumns.DISPLAY_NAME + "=?";
+                try (Cursor cursor = resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        projection, exactSelection, new String[]{fileName},
+                        MediaStore.MediaColumns.DATE_MODIFIED + " DESC")) {
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+                        exactFile = Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                                String.valueOf(cursor.getLong(idColumn)));
+                    }
+                } catch (Exception lookupError) {
+                    android.util.Log.w("HawalatExport", "Fallback exact-name lookup failed", lookupError);
+                }
+            }
+
             File backupFile = new File(getCacheDir(), fileName + ".backup");
             boolean replacing = exactFile != null;
             if (replacing) {
@@ -353,8 +371,29 @@ public class MainActivity extends Activity {
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
                 values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
                 values.put(MediaStore.MediaColumns.IS_PENDING, 1);
-                targetFile = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                if (targetFile == null) throw new Exception("تعذر إنشاء ملف في التنزيلات (MediaStore insert أعاد null)");
+                try {
+                    targetFile = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                } catch (Exception insertError) {
+                    // Retry the exact-name lookup in case the provider committed the row
+                    // but failed while returning its URI.
+                    try (Cursor cursor = resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                            projection, MediaStore.MediaColumns.DISPLAY_NAME + "=?",
+                            new String[]{fileName}, MediaStore.MediaColumns.DATE_MODIFIED + " DESC")) {
+                        if (cursor != null && cursor.moveToFirst()) {
+                            int idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+                            targetFile = Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                                    String.valueOf(cursor.getLong(idColumn)));
+                        }
+                    } catch (Exception lookupError) {
+                        insertError.addSuppressed(lookupError);
+                    }
+                    if (targetFile == null) {
+                        android.util.Log.e("HawalatExport", "MediaStore INSERT failed for " + fileName, insertError);
+                        throw new Exception("تعذر إنشاء ملف Excel في التنزيلات: "
+                                + insertError.getClass().getSimpleName() + ": " + insertError.getMessage(), insertError);
+                    }
+                }
+                if (targetFile == null) throw new Exception("تعذر إنشاء ملف Excel في التنزيلات؛ لم يُرجع MediaStore عنوان الملف");
                 inserted = true;
             } else {
                 ContentValues pending = new ContentValues();
