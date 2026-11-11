@@ -6,6 +6,10 @@ import android.Manifest;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.content.ComponentName;
+import android.content.ContentValues;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.MediaStore;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Environment;
@@ -269,77 +273,127 @@ public class MainActivity extends Activity {
 
     private int writeGroupToDownloads(String label, String prefKey, String today) throws Exception {
         final String fileName = label + "-" + today + ".xlsx";
-        String stage = "قراءة سجلات " + label;
-        File dir = new File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                "حوالات أبو علوي");
-        File target = new File(dir, fileName);
-        File temp = new File(dir, fileName + ".tmp");
-        File backup = new File(dir, fileName + ".bak");
+        String data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
+        ArrayList<String[]> rows = new ArrayList<>();
+        if (data != null && !data.isEmpty()) {
+            for (String row : data.split("\\n")) {
+                String[] p = row.split("\\t", -1);
+                if (p.length >= 4 && today.equals(p[0])) {
+                    rows.add(new String[]{p[2], p[3], p[0], p[1]});
+                }
+            }
+        }
 
+        // Android 10+ uses MediaStore. Direct File writes to public Downloads
+        // can fail under scoped storage even when a legacy directory exists.
+        byte[] bytes = buildXlsxBytes(rows);
+        File validationFile = new File(getCacheDir(), fileName + ".validate");
         try {
-            String data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
-            ArrayList<String[]> rows = new ArrayList<>();
-            if (data != null && !data.isEmpty()) {
-                for (String row : data.split("\\n")) {
-                    String[] p = row.split("\\t", -1);
-                    if (p.length >= 4 && today.equals(p[0])) {
-                        rows.add(new String[]{p[2], p[3], p[0], p[1]});
+            try (FileOutputStream out = new FileOutputStream(validationFile, false)) {
+                out.write(bytes);
+                out.flush();
+                out.getFD().sync();
+            }
+            if (!validationFile.isFile() || validationFile.length() != bytes.length) {
+                throw new Exception("حجم ملف التحقق غير مطابق");
+            }
+            validateXlsx(validationFile, rows.size());
+        } finally {
+            if (validationFile.exists()) validationFile.delete();
+        }
+
+        if (Build.VERSION.SDK_INT >= 29) {
+            android.content.ContentResolver resolver = getContentResolver();
+            String relativePath = Environment.DIRECTORY_DOWNLOADS + "/حوالات أبو علوي/";
+            ArrayList<Uri> previousFiles = new ArrayList<>();
+            String[] projection = new String[]{MediaStore.MediaColumns._ID};
+            String selection = MediaStore.MediaColumns.DISPLAY_NAME + "=? AND "
+                    + MediaStore.MediaColumns.RELATIVE_PATH + "=?";
+            try (Cursor cursor = resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    projection, selection, new String[]{fileName, relativePath}, null)) {
+                if (cursor != null) {
+                    int idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+                    while (cursor.moveToNext()) {
+                        long id = cursor.getLong(idColumn);
+                        previousFiles.add(Uri.withAppendedPath(
+                                MediaStore.Downloads.EXTERNAL_CONTENT_URI, String.valueOf(id)));
                     }
                 }
             }
 
-            stage = "إنشاء مجلد Download/حوالات أبو علوي";
-            if (!dir.exists() && !dir.mkdirs() && !dir.isDirectory()) {
-                throw new Exception("تعذر إنشاء المجلد: " + dir.getAbsolutePath());
-            }
-            if (!dir.isDirectory() || !dir.canWrite()) {
-                throw new Exception("المجلد غير قابل للكتابة: " + dir.getAbsolutePath());
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName + ".pending");
+            values.put(MediaStore.MediaColumns.MIME_TYPE,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+            Uri newFile = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (newFile == null) throw new Exception("تعذر إنشاء ملف في مجلد التنزيلات عبر MediaStore");
+
+            boolean published = false;
+            try {
+                try (java.io.OutputStream out = resolver.openOutputStream(newFile, "w")) {
+                    if (out == null) throw new Exception("تعذر فتح ملف التنزيلات للكتابة");
+                    out.write(bytes);
+                    out.flush();
+                }
+                ContentValues publish = new ContentValues();
+                publish.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                publish.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                int changed = resolver.update(newFile, publish, null, null);
+                if (changed != 1) throw new Exception("تعذر اعتماد ملف XLSX في التنزيلات");
+                published = true;
+            } finally {
+                if (!published) {
+                    try { resolver.delete(newFile, null, null); } catch (Exception ignored) {}
+                }
             }
 
-            stage = "إنشاء ملف Excel بصيغة XLSX";
-            byte[] bytes = buildXlsxBytes(rows);
+            // Remove older same-day copies only after the new workbook is fully written
+            // and published, so a failed export never destroys the previous valid file.
+            for (Uri oldFile : previousFiles) {
+                try { resolver.delete(oldFile, null, null); } catch (Exception ignored) {}
+            }
+            android.util.Log.i("HawalatExport", "MediaStore XLSX published: "
+                    + fileName + ", rows=" + rows.size() + ", bytes=" + bytes.length);
+            return rows.size();
+        }
+
+        // Legacy path for Android 9 and earlier.
+        if (!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
+            throw new Exception("التخزين الخارجي غير متاح");
+        }
+        File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "حوالات أبو علوي");
+        if (!dir.exists() && !dir.mkdirs() && !dir.isDirectory()) {
+            throw new Exception("تعذر إنشاء مجلد التنزيلات: " + dir.getAbsolutePath());
+        }
+        if (!dir.isDirectory() || !dir.canWrite()) {
+            throw new Exception("مجلد التنزيلات غير قابل للكتابة: " + dir.getAbsolutePath());
+        }
+        File target = new File(dir, fileName);
+        File temp = new File(dir, fileName + ".tmp");
+        File backup = new File(dir, fileName + ".bak");
+        try {
             try (FileOutputStream out = new FileOutputStream(temp, false)) {
                 out.write(bytes);
                 out.flush();
                 out.getFD().sync();
             }
-
-            stage = "التحقق من بنية ومحتوى ملف Excel";
-            if (!temp.isFile() || temp.length() != bytes.length) {
-                throw new Exception("حجم الملف المؤقت لا يطابق البيانات المكتوبة");
-            }
             validateXlsx(temp, rows.size());
-
-            stage = "استبدال ملف اليوم مع الاحتفاظ بالنسخة السابقة";
-            if (backup.exists() && !backup.delete()) {
-                throw new Exception("تعذر حذف نسخة احتياطية قديمة");
-            }
+            if (backup.exists() && !backup.delete()) throw new Exception("تعذر حذف النسخة الاحتياطية القديمة");
             boolean hadTarget = target.exists();
-            if (hadTarget && !target.renameTo(backup)) {
-                throw new Exception("تعذر حفظ نسخة احتياطية من ملف اليوم");
-            }
+            if (hadTarget && !target.renameTo(backup)) throw new Exception("تعذر حفظ نسخة ملف اليوم السابقة");
             if (!temp.renameTo(target)) {
                 if (hadTarget && backup.exists()) backup.renameTo(target);
                 throw new Exception("تعذر اعتماد ملف Excel الجديد");
             }
-            if (!target.isFile() || target.length() != bytes.length) {
-                if (target.exists()) target.delete();
-                if (hadTarget && backup.exists()) backup.renameTo(target);
-                throw new Exception("حجم ملف Excel النهائي غير مطابق");
-            }
             if (backup.exists()) backup.delete();
-
-            android.util.Log.i("HawalatExport", "Verified XLSX: "
-                    + target.getAbsolutePath() + ", rows=" + rows.size() + ", bytes=" + target.length());
             return rows.size();
         } catch (Exception ex) {
             if (temp.exists()) temp.delete();
             if (!target.exists() && backup.exists()) backup.renameTo(target);
-            android.util.Log.e("HawalatExport", "XLSX export failed at: " + stage, ex);
-            String detail = ex.getMessage();
-            if (detail == null || detail.trim().isEmpty()) detail = ex.getClass().getSimpleName();
-            throw new Exception(stage + " — " + ex.getClass().getSimpleName() + ": " + detail, ex);
+            throw ex;
         }
     }
 
