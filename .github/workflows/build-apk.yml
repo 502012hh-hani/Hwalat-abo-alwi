@@ -100,7 +100,7 @@ jobs:
               raise SystemExit("Manifest opening tag not found")
           for permission in permissions:
               if permission not in s:
-                  s = s[:end + 1] + "\\n    " + permission + s[end + 1:]
+                  s = s[:end + 1] + "\n    " + permission + s[end + 1:]
                   end = s.find(">", s.find("<manifest"))
           p.write_text(s)
           PY
