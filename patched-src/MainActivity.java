@@ -200,18 +200,25 @@ public class MainActivity extends Activity {
     }
 
     private void exportOneGroup(String label, String prefKey) {
-        if (!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
-            Toast.makeText(this, "التخزين غير متاح", Toast.LENGTH_LONG).show();
-            return;
-        }
         try {
-            File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "حوالات أبو علوي");
-            if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد التصدير");
             String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
-            int n = writeGroup(dir, label, prefKey, today);
-            Toast.makeText(this, "تم تصدير " + n + " سجل إلى Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
+            int n;
+            if (Build.VERSION.SDK_INT >= 29) {
+                // Use the same scoped-storage-safe MediaStore path as bulk export.
+                n = writeGroupToDownloads(label, prefKey, today);
+            } else {
+                if (!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
+                    throw new Exception("التخزين غير متاح");
+                }
+                File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "حوالات أبو علوي");
+                if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد التصدير");
+                n = writeGroup(dir, label, prefKey, today);
+            }
+            Toast.makeText(this, "تم تصدير " + n + " سجل لمجموعة " + label + " إلى Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
         } catch (Exception ex) {
-            Toast.makeText(this, "تعذر التصدير: " + ex.getMessage(), Toast.LENGTH_LONG).show();
+            String reason = ex.getMessage();
+            if (reason == null || reason.trim().isEmpty()) reason = ex.getClass().getSimpleName();
+            Toast.makeText(this, "تعذر تصدير مجموعة " + label + ": " + reason, Toast.LENGTH_LONG).show();
         }
     }
 
