@@ -237,20 +237,63 @@ public class MainActivity extends Activity {
     }
 
     private void exportFiles() {
-        if (!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
-            Toast.makeText(this, "التخزين غير متاح", Toast.LENGTH_LONG).show();
-            return;
-        }
+        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
         try {
-            File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "حوالات أبو علوي");
-            if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد التصدير");
-            String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
-            int total = writeGroup(dir, "العمقي", "rows_العمقي", today)
-                    + writeGroup(dir, "بن دول", "rows_بن دول » محمد علوي احمد", today);
-            Toast.makeText(this, "تم تصدير " + total + " سجل إلى Documents/حوالات أبو علوي", Toast.LENGTH_LONG).show();
+            int total;
+            if (Build.VERSION.SDK_INT >= 29) {
+                total = writeGroupToDownloads("العمقي", "rows_العمقي", today)
+                        + writeGroupToDownloads("بن دول", "rows_بن دول » محمد علوي احمد", today);
+            } else {
+                if (!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
+                    throw new Exception("التخزين الخارجي غير متاح");
+                }
+                File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "حوالات أبو علوي");
+                if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد Documents؛ تحقق من مساحة التخزين");
+                total = writeGroup(dir, "العمقي", "rows_العمقي", today)
+                        + writeGroup(dir, "بن دول", "rows_بن دول » محمد علوي احمد", today);
+            }
+            Toast.makeText(this, "تم تصدير " + total + " سجل. افتح مجلد Documents/حوالات أبو علوي", Toast.LENGTH_LONG).show();
         } catch (Exception ex) {
-            Toast.makeText(this, "تعذر التصدير: " + ex.getMessage(), Toast.LENGTH_LONG).show();
+            String reason = ex.getMessage();
+            if (reason == null || reason.trim().isEmpty()) reason = ex.getClass().getSimpleName();
+            Toast.makeText(this, "تعذر التصدير: " + reason, Toast.LENGTH_LONG).show();
         }
+    }
+
+    private int writeGroupToDownloads(String label, String prefKey, String today) throws Exception {
+        String data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
+        StringBuilder csv = new StringBuilder("\uFEFFاسم المستلم,المبلغ,التاريخ,الوقت\r\n");
+        int n = 0;
+        for (String row : data.split("\\n")) {
+            String[] p = row.split("\\t", -1);
+            if (p.length < 4 || !today.equals(p[0])) continue;
+            csv.append(q(p[2])).append(',').append(q(p[3])).append(',').append(q(p[0])).append(',').append(q(p[1])).append("\r\n");
+            n++;
+        }
+        String fileName = label + "-" + today + ".csv";
+        android.content.ContentValues values = new android.content.ContentValues();
+        values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+        values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/csv");
+        values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                Environment.DIRECTORY_DOCUMENTS + "/حوالات أبو علوي");
+        values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1);
+        android.net.Uri uri = getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+        if (uri == null) throw new Exception("تعذر إنشاء ملف " + fileName + " في Documents");
+        try {
+            java.io.OutputStream out = getContentResolver().openOutputStream(uri);
+            if (out == null) throw new Exception("تعذر فتح ملف " + fileName + " للكتابة");
+            try (java.io.OutputStream stream = out) {
+                stream.write(csv.toString().getBytes(StandardCharsets.UTF_8));
+                stream.flush();
+            }
+            android.content.ContentValues ready = new android.content.ContentValues();
+            ready.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0);
+            getContentResolver().update(uri, ready, null, null);
+        } catch (Exception ex) {
+            getContentResolver().delete(uri, null, null);
+            throw ex;
+        }
+        return n;
     }
 
     private int writeGroup(File dir, String label, String prefKey, String today) throws Exception {
