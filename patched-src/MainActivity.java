@@ -305,50 +305,76 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 29) {
             android.content.ContentResolver resolver = getContentResolver();
             String relativePath = Environment.DIRECTORY_DOWNLOADS + "/حوالات أبو علوي/";
-            ArrayList<Uri> previousFiles = new ArrayList<>();
-            String[] projection = new String[]{MediaStore.MediaColumns._ID};
-            String selection = MediaStore.MediaColumns.DISPLAY_NAME + "=? AND "
+            // Reuse the exact daily file and collect any auto-renamed copies.
+            ArrayList<Uri> matchingFiles = new ArrayList<>();
+            Uri exactFile = null;
+            String[] projection = new String[]{MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME};
+            String selection = MediaStore.MediaColumns.DISPLAY_NAME + " LIKE ? AND "
                     + MediaStore.MediaColumns.RELATIVE_PATH + "=?";
+            String namePattern = label + "-" + today + "%";
             try (Cursor cursor = resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                    projection, selection, new String[]{fileName, relativePath}, null)) {
+                    projection, selection, new String[]{namePattern, relativePath},
+                    MediaStore.MediaColumns.DATE_MODIFIED + " DESC")) {
                 if (cursor != null) {
                     int idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+                    int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
                     while (cursor.moveToNext()) {
-                        long id = cursor.getLong(idColumn);
-                        previousFiles.add(Uri.withAppendedPath(
-                                MediaStore.Downloads.EXTERNAL_CONTENT_URI, String.valueOf(id)));
+                        Uri found = Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                                String.valueOf(cursor.getLong(idColumn)));
+                        matchingFiles.add(found);
+                        if (fileName.equals(cursor.getString(nameColumn)) && exactFile == null) exactFile = found;
                     }
                 }
             }
 
-            ContentValues values = new ContentValues();
-            // Keep the real .xlsx extension from the moment the pending row is created.
-            // IS_PENDING hides the incomplete file from other apps until writing finishes.
-            values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
-            values.put(MediaStore.MediaColumns.MIME_TYPE,
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
-            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
-            Uri newFile = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-            if (newFile == null) throw new Exception("تعذر إنشاء ملف في التنزيلات (MediaStore insert أعاد null)");
+            File backupFile = new File(getCacheDir(), fileName + ".backup");
+            boolean replacing = exactFile != null;
+            if (replacing) {
+                try (FileOutputStream out = new FileOutputStream(backupFile, false)) {
+                    try (java.io.InputStream in = resolver.openInputStream(exactFile)) {
+                        if (in != null) {
+                            byte[] chunk = new byte[8192];
+                            int count;
+                            while ((count = in.read(chunk)) != -1) out.write(chunk, 0, count);
+                        }
+                    }
+                    out.flush();
+                    out.getFD().sync();
+                }
+            }
 
+            Uri targetFile = exactFile;
+            boolean inserted = false;
             boolean published = false;
+            if (targetFile == null) {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                values.put(MediaStore.MediaColumns.MIME_TYPE,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+                values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
+                values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                targetFile = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (targetFile == null) throw new Exception("تعذر إنشاء ملف في التنزيلات (MediaStore insert أعاد null)");
+                inserted = true;
+            } else {
+                ContentValues pending = new ContentValues();
+                pending.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                resolver.update(targetFile, pending, null, null);
+            }
+
             try {
-                // Use a writable file descriptor directly; this avoids providers that
-                // return a null OutputStream for the "w" mode on some Android 10 builds.
-                try (android.os.ParcelFileDescriptor pfd = resolver.openFileDescriptor(newFile, "w")) {
-                    if (pfd == null) throw new Exception("مدير ملفات Android لم يفتح ملف XLSX للكتابة: " + newFile);
+                // "rwt" truncates the existing file instead of creating another copy.
+                try (android.os.ParcelFileDescriptor pfd = resolver.openFileDescriptor(targetFile, "rwt")) {
+                    if (pfd == null) throw new Exception("مدير ملفات Android لم يفتح ملف XLSX للكتابة");
                     try (FileOutputStream out = new FileOutputStream(pfd.getFileDescriptor())) {
                         out.write(bytes);
                         out.flush();
                         out.getFD().sync();
                     }
                 }
-                // Read the actual MediaStore file back before publishing it. This catches
-                // providers that report a successful write but expose an empty workbook.
                 File readBack = new File(getCacheDir(), fileName + ".readback");
                 try {
-                    try (java.io.InputStream in = resolver.openInputStream(newFile)) {
+                    try (java.io.InputStream in = resolver.openInputStream(targetFile)) {
                         if (in == null) throw new Exception("تعذر إعادة قراءة ملف XLSX بعد الكتابة");
                         try (FileOutputStream out = new FileOutputStream(readBack, false)) {
                             byte[] chunk = new byte[8192];
@@ -368,22 +394,45 @@ public class MainActivity extends Activity {
                 }
                 ContentValues publish = new ContentValues();
                 publish.put(MediaStore.MediaColumns.IS_PENDING, 0);
-                int changed = resolver.update(newFile, publish, null, null);
+                int changed = resolver.update(targetFile, publish, null, null);
                 if (changed != 1) throw new Exception("تعذر اعتماد ملف XLSX في التنزيلات؛ عدد الصفوف المحدّثة: " + changed);
                 published = true;
             } catch (Exception writeError) {
+                if (replacing && backupFile.isFile()) {
+                    try {
+                        try (android.os.ParcelFileDescriptor pfd = resolver.openFileDescriptor(targetFile, "rwt")) {
+                            if (pfd != null) {
+                                try (java.io.FileInputStream in = new java.io.FileInputStream(backupFile);
+                                     FileOutputStream out = new FileOutputStream(pfd.getFileDescriptor())) {
+                                    byte[] chunk = new byte[8192];
+                                    int count;
+                                    while ((count = in.read(chunk)) != -1) out.write(chunk, 0, count);
+                                    out.flush();
+                                    out.getFD().sync();
+                                }
+                            }
+                        }
+                        ContentValues restore = new ContentValues();
+                        restore.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                        resolver.update(targetFile, restore, null, null);
+                    } catch (Exception restoreError) {
+                        android.util.Log.e("HawalatExport", "Could not restore previous daily workbook", restoreError);
+                    }
+                }
                 throw new Exception("فشل حفظ " + fileName + " داخل Download/حوالات أبو علوي: "
                         + writeError.getClass().getSimpleName() + ": " + writeError.getMessage(), writeError);
             } finally {
-                if (!published) {
-                    try { resolver.delete(newFile, null, null); } catch (Exception ignored) {}
+                if (!published && inserted) {
+                    try { resolver.delete(targetFile, null, null); } catch (Exception ignored) {}
                 }
+                if (backupFile.exists()) backupFile.delete();
             }
 
-            // Remove older same-day copies only after the new workbook is fully written
-            // and published, so a failed export never destroys the previous valid file.
-            for (Uri oldFile : previousFiles) {
-                try { resolver.delete(oldFile, null, null); } catch (Exception ignored) {}
+            // Keep only the canonical same-day file; remove auto-renamed duplicates.
+            for (Uri oldFile : matchingFiles) {
+                if (!oldFile.equals(targetFile)) {
+                    try { resolver.delete(oldFile, null, null); } catch (Exception ignored) {}
+                }
             }
             android.util.Log.i("HawalatExport", "MediaStore XLSX published: "
                     + fileName + ", rows=" + rows.size() + ", bytes=" + bytes.length);
@@ -516,8 +565,12 @@ public class MainActivity extends Activity {
                     + "<cellStyles count='1'><cellStyle name='Normal' xfId='0' builtinId='0'/></cellStyles></styleSheet>");
 
             StringBuilder sheet = new StringBuilder();
-            sheet.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
-                 .append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+            String q = String.valueOf((char) 34);
+            sheet.append("<?xml version=" + q + "1.0" + q + " encoding=" + q + "UTF-8" + q + " standalone=" + q + "yes" + q + "?>")
+                 .append("<worksheet xmlns=" + q + "http://schemas.openxmlformats.org/spreadsheetml/2006/main" + q + ">")
+                 .append("<dimension ref=" + q + "A1:D" + (rows.size() + 1) + q + "/>")
+                 .append("<sheetViews><sheetView workbookViewId=" + q + "0" + q + " tabSelected=" + q + "1" + q + "><selection activeCell=" + q + "A1" + q + " sqref=" + q + "A1" + q + "/></sheetView></sheetViews>")
+                 .append("<sheetFormatPr defaultRowHeight=" + q + "18" + q + "/><sheetData>");
             String[] headers = {"اسم المستلم", "المبلغ", "التاريخ", "الوقت"};
             appendXlsxRow(sheet, 1, headers, true, false);
             java.util.HashSet<String> seenTransfers = new java.util.HashSet<>();
