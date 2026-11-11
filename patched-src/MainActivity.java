@@ -269,111 +269,78 @@ public class MainActivity extends Activity {
 
     private int writeGroupToDownloads(String label, String prefKey, String today) throws Exception {
         final String fileName = label + "-" + today + ".csv";
-        final String relativePath = Environment.DIRECTORY_DOWNLOADS + "/حوالات أبو علوي/";
-        final String uriPrefKey = "export_uri_" + label + "_" + today;
         String stage = "قراءة سجلات " + label;
-        android.net.Uri uri = null;
-        boolean created = false;
-        StringBuilder csv = new StringBuilder("\uFEFFاسم المستلم,المبلغ,التاريخ,الوقت\r\n");
+        File dir = new File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "حوالات أبو علوي");
+        File target = new File(dir, fileName);
+        File temp = new File(dir, fileName + ".tmp");
+        File backup = new File(dir, fileName + ".bak");
         int n = 0;
 
         try {
             String data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
+            StringBuilder csv = new StringBuilder("\uFEFFاسم المستلم,المبلغ,التاريخ,الوقت\\r\\n");
             if (data != null && !data.isEmpty()) {
                 for (String row : data.split("\\n")) {
                     String[] p = row.split("\\t", -1);
                     if (p.length < 4 || !today.equals(p[0])) continue;
                     csv.append(q(p[2])).append(',').append(q(p[3])).append(',')
-                       .append(q(p[0])).append(',').append(q(p[1])).append("\r\n");
+                       .append(q(p[0])).append(',').append(q(p[1])).append("\\r\\n");
                     n++;
                 }
             }
 
-            stage = "تحديد ملف اليوم في Download";
-            String savedUri = getSharedPreferences("hawalat", MODE_PRIVATE).getString(uriPrefKey, "");
-            if (!savedUri.isEmpty()) {
-                android.net.Uri candidate = android.net.Uri.parse(savedUri);
-                try (java.io.InputStream test = getContentResolver().openInputStream(candidate)) {
-                    if (test != null) uri = candidate;
-                } catch (Exception ignored) {
-                    getSharedPreferences("hawalat", MODE_PRIVATE).edit().remove(uriPrefKey).apply();
-                }
+            stage = "إنشاء مجلد Download/حوالات أبو علوي";
+            if (!dir.exists() && !dir.mkdirs() && !dir.isDirectory()) {
+                throw new Exception("تعذر إنشاء المجلد: " + dir.getAbsolutePath());
+            }
+            if (!dir.isDirectory() || !dir.canWrite()) {
+                throw new Exception("المجلد غير قابل للكتابة: " + dir.getAbsolutePath());
             }
 
-            if (uri == null) {
-                android.net.Uri collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI;
-                String[] projection = { android.provider.MediaStore.MediaColumns._ID };
-                String selection = android.provider.MediaStore.MediaColumns.DISPLAY_NAME + "=? AND "
-                        + android.provider.MediaStore.MediaColumns.RELATIVE_PATH + "=?";
-                try (android.database.Cursor cursor = getContentResolver().query(
-                        collection, projection, selection, new String[]{fileName, relativePath}, null)) {
-                    if (cursor != null && cursor.moveToFirst()) {
-                        uri = android.content.ContentUris.withAppendedId(collection, cursor.getLong(0));
-                    }
-                }
-            }
-
-            stage = "إنشاء ملف " + fileName;
-            android.content.ContentValues values = new android.content.ContentValues();
-            values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
-            values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/csv");
-            values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
-            values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1);
-
-            if (uri == null) {
-                uri = getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                created = true;
-            } else {
-                int updated = getContentResolver().update(uri, values, null, null);
-                if (updated == 0) throw new Exception("لم يقبل النظام تحديث سجل الملف الموجود");
-            }
-            if (uri == null) throw new Exception("أعاد Android مسار ملف فارغاً (MediaStore.insert)");
-
-            stage = "كتابة بيانات ملف " + fileName;
-            try (java.io.OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
-                if (out == null) throw new Exception("فتح ملف الكتابة أعاد OutputStream فارغاً");
-                out.write(csv.toString().getBytes(StandardCharsets.UTF_8));
+            stage = "كتابة الملف المؤقت";
+            byte[] bytes = csv.toString().getBytes(StandardCharsets.UTF_8);
+            try (FileOutputStream out = new FileOutputStream(temp, false)) {
+                out.write(bytes);
                 out.flush();
+                out.getFD().sync();
             }
 
-            stage = "التحقق من وجود الملف بعد الكتابة";
-            long bytes = 0;
-            try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
-                if (in == null) throw new Exception("تعذر فتح الملف للتحقق بعد الحفظ");
-                byte[] buffer = new byte[4096];
-                int read;
-                while ((read = in.read(buffer)) != -1) bytes += read;
-            }
-            if (bytes <= 0) throw new Exception("الملف موجود لكنه فارغ (0 byte)");
-            if (bytes != csv.toString().getBytes(StandardCharsets.UTF_8).length) {
-                throw new Exception("حجم الملف بعد الحفظ لا يطابق البيانات المكتوبة");
+            stage = "التحقق من الملف المؤقت";
+            if (!temp.isFile() || temp.length() != bytes.length || temp.length() == 0) {
+                throw new Exception("فشل التحقق من الملف المؤقت؛ الحجم المتوقع "
+                        + bytes.length + " والحجم الفعلي " + (temp.exists() ? temp.length() : -1));
             }
 
-            stage = "إتاحة الملف في مجلد Download";
-            android.content.ContentValues ready = new android.content.ContentValues();
-            ready.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0);
-            int published = getContentResolver().update(uri, ready, null, null);
-            if (published == 0) throw new Exception("تمت الكتابة لكن Android لم يؤكد إتاحة الملف");
+            stage = "استبدال ملف اليوم دون فقدان النسخة السابقة";
+            if (backup.exists() && !backup.delete()) {
+                throw new Exception("تعذر حذف نسخة احتياطية قديمة: " + backup.getName());
+            }
+            boolean hadTarget = target.exists();
+            if (hadTarget && !target.renameTo(backup)) {
+                throw new Exception("تعذر حفظ نسخة احتياطية من الملف السابق");
+            }
+            if (!temp.renameTo(target)) {
+                if (hadTarget && backup.exists()) backup.renameTo(target);
+                throw new Exception("تعذر اعتماد الملف الجديد مكان ملف اليوم");
+            }
 
-            getSharedPreferences("hawalat", MODE_PRIVATE).edit()
-                    .putString(uriPrefKey, uri.toString()).apply();
-            android.util.Log.i("HawalatExport", "Export verified: " + fileName
-                    + ", rows=" + n + ", bytes=" + bytes + ", uri=" + uri);
+            stage = "التحقق النهائي من الملف";
+            if (!target.isFile() || target.length() != bytes.length) {
+                if (target.exists()) target.delete();
+                if (hadTarget && backup.exists()) backup.renameTo(target);
+                throw new Exception("الملف النهائي غير مكتمل أو حجمه غير مطابق");
+            }
+            if (backup.exists()) backup.delete();
+
+            android.util.Log.i("HawalatExport", "Verified file: "
+                    + target.getAbsolutePath() + ", rows=" + n + ", bytes=" + target.length());
             return n;
         } catch (Exception ex) {
+            if (temp.exists()) temp.delete();
+            if (!target.exists() && backup.exists()) backup.renameTo(target);
             android.util.Log.e("HawalatExport", "Export failed at: " + stage, ex);
-            if (uri != null) {
-                try {
-                    if (created) getContentResolver().delete(uri, null, null);
-                    else {
-                        android.content.ContentValues ready = new android.content.ContentValues();
-                        ready.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0);
-                        getContentResolver().update(uri, ready, null, null);
-                    }
-                } catch (Exception cleanup) {
-                    android.util.Log.e("HawalatExport", "Cleanup failed", cleanup);
-                }
-            }
             String detail = ex.getMessage();
             if (detail == null || detail.trim().isEmpty()) detail = ex.getClass().getSimpleName();
             throw new Exception(stage + " — " + ex.getClass().getSimpleName() + ": " + detail, ex);
