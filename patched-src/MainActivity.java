@@ -322,27 +322,36 @@ public class MainActivity extends Activity {
             }
 
             ContentValues values = new ContentValues();
-            values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName + ".pending");
+            // Keep the real .xlsx extension from the moment the pending row is created.
+            // IS_PENDING hides the incomplete file from other apps until writing finishes.
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
             values.put(MediaStore.MediaColumns.MIME_TYPE,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
             values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
             values.put(MediaStore.MediaColumns.IS_PENDING, 1);
             Uri newFile = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-            if (newFile == null) throw new Exception("تعذر إنشاء ملف في مجلد التنزيلات عبر MediaStore");
+            if (newFile == null) throw new Exception("تعذر إنشاء ملف في التنزيلات (MediaStore insert أعاد null)");
 
             boolean published = false;
             try {
-                try (java.io.OutputStream out = resolver.openOutputStream(newFile, "w")) {
-                    if (out == null) throw new Exception("تعذر فتح ملف التنزيلات للكتابة");
-                    out.write(bytes);
-                    out.flush();
+                // Use a writable file descriptor directly; this avoids providers that
+                // return a null OutputStream for the "w" mode on some Android 10 builds.
+                try (android.os.ParcelFileDescriptor pfd = resolver.openFileDescriptor(newFile, "w")) {
+                    if (pfd == null) throw new Exception("مدير ملفات Android لم يفتح ملف XLSX للكتابة: " + newFile);
+                    try (FileOutputStream out = new FileOutputStream(pfd.getFileDescriptor())) {
+                        out.write(bytes);
+                        out.flush();
+                        out.getFD().sync();
+                    }
                 }
                 ContentValues publish = new ContentValues();
-                publish.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
                 publish.put(MediaStore.MediaColumns.IS_PENDING, 0);
                 int changed = resolver.update(newFile, publish, null, null);
-                if (changed != 1) throw new Exception("تعذر اعتماد ملف XLSX في التنزيلات");
+                if (changed != 1) throw new Exception("تعذر اعتماد ملف XLSX في التنزيلات؛ عدد الصفوف المحدّثة: " + changed);
                 published = true;
+            } catch (Exception writeError) {
+                throw new Exception("فشل حفظ " + fileName + " داخل Download/حوالات أبو علوي: "
+                        + writeError.getClass().getSimpleName() + ": " + writeError.getMessage(), writeError);
             } finally {
                 if (!published) {
                     try { resolver.delete(newFile, null, null); } catch (Exception ignored) {}
