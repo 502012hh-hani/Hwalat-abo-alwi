@@ -56,7 +56,7 @@ jobs:
           app = root.find("application")
           if app is None:
               raise SystemExit("Manifest application element is missing")
-          service = None
+          # Android 10 / targetSdk 28: keep legacy public Downloads access for the app.\n          app.set(android + "requestLegacyExternalStorage", "true")\n          service = None
           for item in app.findall("service"):
               name = item.get(android + "name", "")
               if name in (".WhatsAppNotificationListener", "com.abualawi.hawalat.WhatsAppNotificationListener"):
