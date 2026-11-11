@@ -106,6 +106,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                     .putString("active_probe_time", stamp)
+                    .putLong("active_probe_at_ms", System.currentTimeMillis())
                     .putString("active_probe_packages", packages.toString())
                     .putString("active_probe_whatsapp_details", details.toString())
                     .putBoolean("active_probe_whatsapp_found", whatsappFound)
@@ -113,6 +114,8 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                     .remove("active_probe_error").apply();
         } catch (Exception ex) {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putString("active_probe_time", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date()))
+                    .putLong("active_probe_at_ms", System.currentTimeMillis())
                     .putString("active_probe_error", ex.getClass().getSimpleName() + ": " + ex.getMessage()).apply();
         }
     }
