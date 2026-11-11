@@ -504,14 +504,15 @@ public class MainActivity extends Activity {
     }
 
     private void appendXlsxRow(StringBuilder xml, int rowNumber, String[] values, boolean header, boolean duplicate) {
-        xml.append("<row r=\"").append(rowNumber).append("\">");
+        xml.append("<row r=\\"").append(rowNumber).append("\\">");
         for (int col = 0; col < values.length; col++) {
             String ref = String.valueOf((char)('A' + col)) + rowNumber;
             String value = values[col] == null ? "" : values[col];
+            String style = duplicate ? " s=\\"1\\"" : "";
             if (!header && col == 1 && value.matches("[0-9]+")) {
-                xml.append("<c r=\"").append(ref).append("\"><v>").append(value).append("</v></c>");
+                xml.append("<c r=\\"").append(ref).append("\\"").append(style).append("><v>").append(value).append("</v></c>");
             } else {
-                xml.append("<c r=\"").append(ref).append("\" t=\"inlineStr\"><is><t xml:space=\"preserve\">")
+                xml.append("<c r=\\"").append(ref).append("\\"").append(style).append(" t=\\"inlineStr\\"><is><t xml:space=\\"preserve\\">")
                    .append(xmlEscape(value)).append("</t></is></c>");
             }
         }
