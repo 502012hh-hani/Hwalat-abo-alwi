@@ -214,7 +214,7 @@ public class MainActivity extends Activity {
                 if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد التصدير");
                 n = writeGroup(dir, label, prefKey, today);
             }
-            Toast.makeText(this, "تم تصدير " + n + " سجل لمجموعة " + label + " إلى Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "تم إنشاء ملف Excel حقيقي (" + n + " سجل) في Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
         } catch (Exception ex) {
             String reason = ex.getMessage();
             if (reason == null || reason.trim().isEmpty()) reason = ex.getClass().getSimpleName();
@@ -259,7 +259,7 @@ public class MainActivity extends Activity {
                 total = writeGroup(dir, "العمقي", "rows_العمقي", today)
                         + writeGroup(dir, "بن دول", "rows_بن دول » محمد علوي احمد", today);
             }
-            Toast.makeText(this, "تم تصدير " + total + " سجل. افتح مجلد Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "تم إنشاء ملفات Excel (" + total + " سجل). افتح Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
         } catch (Exception ex) {
             String reason = ex.getMessage();
             if (reason == null || reason.trim().isEmpty()) reason = ex.getClass().getSimpleName();
@@ -268,7 +268,7 @@ public class MainActivity extends Activity {
     }
 
     private int writeGroupToDownloads(String label, String prefKey, String today) throws Exception {
-        final String fileName = label + "-" + today + ".csv";
+        final String fileName = label + "-" + today + ".xlsx";
         String stage = "قراءة سجلات " + label;
         File dir = new File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
@@ -276,18 +276,16 @@ public class MainActivity extends Activity {
         File target = new File(dir, fileName);
         File temp = new File(dir, fileName + ".tmp");
         File backup = new File(dir, fileName + ".bak");
-        int n = 0;
 
         try {
             String data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
-            StringBuilder csv = new StringBuilder("\uFEFFاسم المستلم,المبلغ,التاريخ,الوقت\\r\\n");
+            ArrayList<String[]> rows = new ArrayList<>();
             if (data != null && !data.isEmpty()) {
                 for (String row : data.split("\\n")) {
                     String[] p = row.split("\\t", -1);
-                    if (p.length < 4 || !today.equals(p[0])) continue;
-                    csv.append(q(p[2])).append(',').append(q(p[3])).append(',')
-                       .append(q(p[0])).append(',').append(q(p[1])).append("\\r\\n");
-                    n++;
+                    if (p.length >= 4 && today.equals(p[0])) {
+                        rows.add(new String[]{p[2], p[3], p[0], p[1]});
+                    }
                 }
             }
 
@@ -299,52 +297,124 @@ public class MainActivity extends Activity {
                 throw new Exception("المجلد غير قابل للكتابة: " + dir.getAbsolutePath());
             }
 
-            stage = "كتابة الملف المؤقت";
-            byte[] bytes = csv.toString().getBytes(StandardCharsets.UTF_8);
+            stage = "إنشاء ملف Excel بصيغة XLSX";
+            byte[] bytes = buildXlsxBytes(rows);
             try (FileOutputStream out = new FileOutputStream(temp, false)) {
                 out.write(bytes);
                 out.flush();
                 out.getFD().sync();
             }
 
-            stage = "التحقق من الملف المؤقت";
-            if (!temp.isFile() || temp.length() != bytes.length || temp.length() == 0) {
-                throw new Exception("فشل التحقق من الملف المؤقت؛ الحجم المتوقع "
-                        + bytes.length + " والحجم الفعلي " + (temp.exists() ? temp.length() : -1));
+            stage = "التحقق من بنية ملف Excel";
+            boolean workbookFound = false;
+            boolean sheetFound = false;
+            try (java.util.zip.ZipInputStream zin = new java.util.zip.ZipInputStream(
+                    new java.io.FileInputStream(temp), StandardCharsets.UTF_8)) {
+                java.util.zip.ZipEntry entry;
+                while ((entry = zin.getNextEntry()) != null) {
+                    if ("xl/workbook.xml".equals(entry.getName())) workbookFound = true;
+                    if ("xl/worksheets/sheet1.xml".equals(entry.getName())) sheetFound = true;
+                }
+            }
+            if (!temp.isFile() || temp.length() != bytes.length || !workbookFound || !sheetFound) {
+                throw new Exception("ملف XLSX غير مكتمل؛ workbook=" + workbookFound + ", sheet=" + sheetFound);
             }
 
-            stage = "استبدال ملف اليوم دون فقدان النسخة السابقة";
+            stage = "استبدال ملف اليوم مع الاحتفاظ بالنسخة السابقة";
             if (backup.exists() && !backup.delete()) {
-                throw new Exception("تعذر حذف نسخة احتياطية قديمة: " + backup.getName());
+                throw new Exception("تعذر حذف نسخة احتياطية قديمة");
             }
             boolean hadTarget = target.exists();
             if (hadTarget && !target.renameTo(backup)) {
-                throw new Exception("تعذر حفظ نسخة احتياطية من الملف السابق");
+                throw new Exception("تعذر حفظ نسخة احتياطية من ملف اليوم");
             }
             if (!temp.renameTo(target)) {
                 if (hadTarget && backup.exists()) backup.renameTo(target);
-                throw new Exception("تعذر اعتماد الملف الجديد مكان ملف اليوم");
+                throw new Exception("تعذر اعتماد ملف Excel الجديد");
             }
-
-            stage = "التحقق النهائي من الملف";
             if (!target.isFile() || target.length() != bytes.length) {
                 if (target.exists()) target.delete();
                 if (hadTarget && backup.exists()) backup.renameTo(target);
-                throw new Exception("الملف النهائي غير مكتمل أو حجمه غير مطابق");
+                throw new Exception("حجم ملف Excel النهائي غير مطابق");
             }
             if (backup.exists()) backup.delete();
 
-            android.util.Log.i("HawalatExport", "Verified file: "
-                    + target.getAbsolutePath() + ", rows=" + n + ", bytes=" + target.length());
-            return n;
+            android.util.Log.i("HawalatExport", "Verified XLSX: "
+                    + target.getAbsolutePath() + ", rows=" + rows.size() + ", bytes=" + target.length());
+            return rows.size();
         } catch (Exception ex) {
             if (temp.exists()) temp.delete();
             if (!target.exists() && backup.exists()) backup.renameTo(target);
-            android.util.Log.e("HawalatExport", "Export failed at: " + stage, ex);
+            android.util.Log.e("HawalatExport", "XLSX export failed at: " + stage, ex);
             String detail = ex.getMessage();
             if (detail == null || detail.trim().isEmpty()) detail = ex.getClass().getSimpleName();
             throw new Exception(stage + " — " + ex.getClass().getSimpleName() + ": " + detail, ex);
         }
+    }
+
+    private byte[] buildXlsxBytes(ArrayList<String[]> rows) throws Exception {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(buffer, StandardCharsets.UTF_8)) {
+            putZipText(zip, "[Content_Types].xml",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+                    + "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
+                    + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+                    + "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>"
+                    + "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+                    + "</Types>");
+            putZipText(zip, "_rels/.rels",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                    + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>"
+                    + "</Relationships>");
+            putZipText(zip, "xl/workbook.xml",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" "
+                    + "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+                    + "<sheets><sheet name=\"الحوالات\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>");
+            putZipText(zip, "xl/_rels/workbook.xml.rels",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                    + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
+                    + "</Relationships>");
+
+            StringBuilder sheet = new StringBuilder();
+            sheet.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
+                 .append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+            String[] headers = {"اسم المستلم", "المبلغ", "التاريخ", "الوقت"};
+            appendXlsxRow(sheet, 1, headers, true);
+            for (int i = 0; i < rows.size(); i++) appendXlsxRow(sheet, i + 2, rows.get(i), false);
+            sheet.append("</sheetData></worksheet>");
+            putZipText(zip, "xl/worksheets/sheet1.xml", sheet.toString());
+        }
+        return buffer.toByteArray();
+    }
+
+    private void appendXlsxRow(StringBuilder xml, int rowNumber, String[] values, boolean header) {
+        xml.append("<row r=\"").append(rowNumber).append("\">");
+        for (int col = 0; col < values.length; col++) {
+            String ref = String.valueOf((char)('A' + col)) + rowNumber;
+            String value = values[col] == null ? "" : values[col];
+            if (!header && col == 1 && value.matches("[0-9]+")) {
+                xml.append("<c r=\"").append(ref).append("\"><v>").append(value).append("</v></c>");
+            } else {
+                xml.append("<c r=\"").append(ref).append("\" t=\"inlineStr\"><is><t xml:space=\"preserve\">")
+                   .append(xmlEscape(value)).append("</t></is></c>");
+            }
+        }
+        xml.append("</row>");
+    }
+
+    private String xmlEscape(String value) {
+        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&apos;");
+    }
+
+    private void putZipText(java.util.zip.ZipOutputStream zip, String name, String value) throws Exception {
+        zip.putNextEntry(new java.util.zip.ZipEntry(name));
+        zip.write(value.getBytes(StandardCharsets.UTF_8));
+        zip.closeEntry();
     }
 
     private int writeGroup(File dir, String label, String prefKey, String today) throws Exception {
