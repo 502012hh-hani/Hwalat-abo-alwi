@@ -269,25 +269,50 @@ public class MainActivity extends Activity {
 
     private int writeGroupToDownloads(String label, String prefKey, String today) throws Exception {
         String data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
-        StringBuilder csv = new StringBuilder("\uFEFFاسم المستلم,المبلغ,التاريخ,الوقت\r\n");
+        StringBuilder csv = new StringBuilder("\uFEFFاسم المستلم,المبلغ,التاريخ,الوقت\\r\\n");
         int n = 0;
         for (String row : data.split("\\n")) {
             String[] p = row.split("\\t", -1);
             if (p.length < 4 || !today.equals(p[0])) continue;
-            csv.append(q(p[2])).append(',').append(q(p[3])).append(',').append(q(p[0])).append(',').append(q(p[1])).append("\r\n");
+            csv.append(q(p[2])).append(',').append(q(p[3])).append(',').append(q(p[0])).append(',').append(q(p[1])).append("\\r\\n");
             n++;
         }
+
+        // One file per group per local calendar day. Re-export replaces the same
+        // file with the complete current day's rows instead of creating duplicates.
         String fileName = label + "-" + today + ".csv";
+        String relativePath = Environment.DIRECTORY_DOWNLOADS + "/حوالات أبو علوي/";
+        android.net.Uri collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+        android.net.Uri uri = null;
+        boolean created = false;
+
+        String[] projection = { android.provider.MediaStore.MediaColumns._ID };
+        String selection = android.provider.MediaStore.MediaColumns.DISPLAY_NAME + "=? AND "
+                + android.provider.MediaStore.MediaColumns.RELATIVE_PATH + "=?";
+        try (android.database.Cursor cursor = getContentResolver().query(
+                collection, projection, selection, new String[]{fileName, relativePath}, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                long id = cursor.getLong(0);
+                uri = android.content.ContentUris.withAppendedId(collection, id);
+            }
+        }
+
         android.content.ContentValues values = new android.content.ContentValues();
         values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
         values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/csv");
-        values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
-                Environment.DIRECTORY_DOWNLOADS + "/حوالات أبو علوي");
+        values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
         values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1);
-        android.net.Uri uri = getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-        if (uri == null) throw new Exception("تعذر إنشاء ملف " + fileName + " في Download");
+
+        if (uri == null) {
+            uri = getContentResolver().insert(collection, values);
+            created = true;
+        } else {
+            getContentResolver().update(uri, values, null, null);
+        }
+        if (uri == null) throw new Exception("تعذر إنشاء أو تحديث ملف " + fileName + " في Download");
+
         try {
-            java.io.OutputStream out = getContentResolver().openOutputStream(uri);
+            java.io.OutputStream out = getContentResolver().openOutputStream(uri, "wt");
             if (out == null) throw new Exception("تعذر فتح ملف " + fileName + " للكتابة");
             try (java.io.OutputStream stream = out) {
                 stream.write(csv.toString().getBytes(StandardCharsets.UTF_8));
@@ -297,7 +322,12 @@ public class MainActivity extends Activity {
             ready.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0);
             getContentResolver().update(uri, ready, null, null);
         } catch (Exception ex) {
-            getContentResolver().delete(uri, null, null);
+            if (created) getContentResolver().delete(uri, null, null);
+            else {
+                android.content.ContentValues ready = new android.content.ContentValues();
+                ready.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0);
+                getContentResolver().update(uri, ready, null, null);
+            }
             throw ex;
         }
         return n;
