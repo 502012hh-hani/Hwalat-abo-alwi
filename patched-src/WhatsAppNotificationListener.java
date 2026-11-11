@@ -354,23 +354,27 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         String key = "rows_" + group;
         android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         String old = prefs.getString(key, "");
-        String normalizedName = name.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
-        String duplicateKey = date + "\t" + normalizedName + "\t" + amount;
-        for (String line : old.split("\\n")) {
-            String[] a = line.split("\\t", -1);
-            if (a.length >= 4) {
-                String existing = a[0] + "\t" + a[2].replaceAll("\\s+", "").toLowerCase(Locale.ROOT)
-                        + "\t" + a[3];
-                if (existing.equals(duplicateKey)) {
-                    setStatus("تم تجاهل حوالة مكررة: " + name + " - " + amount);
-                    return;
-                }
-            }
-        }
+        // Keep every legitimate transfer, including repeated recipient/amount pairs.
+        // Export marks repeated pairs visually; notification reposts are filtered separately
+        // by the active-notification signature before reaching this method.
         String row = date + "\t" + time + "\t" + name + "\t" + amount;
         prefs.edit().putString(key, row + (old.isEmpty() ? "" : "\n" + old))
-                .putString("last_status", "تم تسجيل حوالة: " + name + " - " + amount + " (" + group + ")")
+                .putString("last_status", "تم تسجيل حوالة: " + name + " - " + amount
+                        + " (" + group + ")" + (containsSameTransfer(old, date, name, amount)
+                        ? " — تكرار محفوظ وسيُميّز في Excel" : ""))
                 .apply();
+    }
+
+    private boolean containsSameTransfer(String old, String date, String name, String amount) {
+        String normalizedName = normalizeArabic(name).replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        for (String line : old.split("\\n")) {
+            String[] p = line.split("\\t", -1);
+            if (p.length >= 4 && date.equals(p[0]) && amount.equals(p[3])
+                    && normalizedName.equals(normalizeArabic(p[2]).replaceAll("\\s+", "").toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String extractAmount(String text) {
