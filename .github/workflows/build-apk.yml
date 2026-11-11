@@ -107,68 +107,16 @@ jobs:
           p.write_text(s)
           PY
 
-      - name: Prepare permanent release signing
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "Missing GitHub secret: ANDROID_KEYSTORE_BASE64"; exit 1; }
-          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "Missing GitHub secret: ANDROID_KEYSTORE_PASSWORD"; exit 1; }
-          test -n "$ANDROID_KEY_ALIAS" || { echo "Missing GitHub secret: ANDROID_KEY_ALIAS"; exit 1; }
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/hawalat-release.p12"
-          test -s "$RUNNER_TEMP/hawalat-release.p12"
-          echo "HAWALAT_STORE_FILE=$RUNNER_TEMP/hawalat-release.p12" >> "$GITHUB_ENV"
+      - name: Build APK
+        run: gradle --no-daemon :app:assembleDebug
 
-      - name: Configure Gradle release signature
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        shell: bash
+      - name: Verify APK
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path("app/build.gradle")
-          s = p.read_text()
-          if "signingConfigs" not in s:
-              block = '''
-              signingConfigs {
-                  release {
-                      storeFile file(System.getenv("HAWALAT_STORE_FILE"))
-                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
-                      keyPassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                  }
-              }
-              buildTypes {
-                  release {
-                      signingConfig signingConfigs.release
-                      minifyEnabled false
-                  }
-              }
-          '''
-              m = re.search(r'android\s*\{', s)
-              if not m:
-                  raise SystemExit("Could not locate android { block in app/build.gradle")
-              pos = m.end()
-              s = s[:pos] + "\n" + block + s[pos:]
-          p.write_text(s)
-          print("Permanent release signing configured")
-          PY
-
-      - name: Build signed APK
-        run: gradle --no-daemon :app:assembleRelease
-
-      - name: Verify signed APK
-        run: |
-          test -s app/build/outputs/apk/release/app-release.apk
+          test -s app/build/outputs/apk/debug/app-debug.apk
           test "$(stat -c%s app/build/outputs/apk/release/app-release.apk)" -gt 10000
           unzip -t app/build/outputs/apk/release/app-release.apk
 
-      - name: Save signed APK
+      - name: Save APK
         uses: actions/upload-artifact@v4
         with:
           name: Hawalat-Abu-Alawi
