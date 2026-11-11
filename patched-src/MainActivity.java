@@ -404,6 +404,7 @@ public class MainActivity extends Activity {
         required.add("xl/workbook.xml");
         required.add("xl/_rels/workbook.xml.rels");
         required.add("xl/worksheets/sheet1.xml");
+        required.add("xl/styles.xml");
         int worksheetRows = -1;
         int workbookSheets = 0;
         String spreadsheetNs = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -451,6 +452,7 @@ public class MainActivity extends Activity {
                     + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
                     + "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>"
                     + "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+                    + "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>"
                     + "</Types>");
             putZipText(zip, "_rels/.rels",
                     "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
@@ -466,21 +468,42 @@ public class MainActivity extends Activity {
                     "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
                     + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
                     + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
+                    + "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"
                     + "</Relationships>");
+
+            putZipText(zip, "xl/styles.xml",
+                    "<?xml version=\\"1.0\\" encoding=\\"UTF-8\\" standalone=\\"yes\\"?>"
+                    + "<styleSheet xmlns=\\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\\">"
+                    + "<fonts count=\\"1\\"><font><sz val=\\"11\\"/><name val=\\"Calibri\\"/></font></fonts>"
+                    + "<fills count=\\"3\\"><fill><patternFill patternType=\\"none\\"/></fill>"
+                    + "<fill><patternFill patternType=\\"gray125\\"/></fill>"
+                    + "<fill><patternFill patternType=\\"solid\\"><fgColor rgb=\\"FFFFFF00\\"/><bgColor indexed=\\"64\\"/></patternFill></fill></fills>"
+                    + "<borders count=\\"1\\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>"
+                    + "<cellStyleXfs count=\\"1\\"><xf numFmtId=\\"0\\" fontId=\\"0\\" fillId=\\"0\\" borderId=\\"0\\"/></cellStyleXfs>"
+                    + "<cellXfs count=\\"2\\"><xf numFmtId=\\"0\\" fontId=\\"0\\" fillId=\\"0\\" borderId=\\"0\\" xfId=\\"0\\"/>"
+                    + "<xf numFmtId=\\"0\\" fontId=\\"0\\" fillId=\\"2\\" borderId=\\"0\\" xfId=\\"0\\" applyFill=\\"1\\"/></cellXfs>"
+                    + "<cellStyles count=\\"1\\"><cellStyle name=\\"Normal\\" xfId=\\"0\\" builtinId=\\"0\\"/></cellStyles></styleSheet>");
 
             StringBuilder sheet = new StringBuilder();
             sheet.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
                  .append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
             String[] headers = {"اسم المستلم", "المبلغ", "التاريخ", "الوقت"};
-            appendXlsxRow(sheet, 1, headers, true);
-            for (int i = 0; i < rows.size(); i++) appendXlsxRow(sheet, i + 2, rows.get(i), false);
+            appendXlsxRow(sheet, 1, headers, true, false);
+            java.util.HashSet<String> seenTransfers = new java.util.HashSet<>();
+            for (int i = 0; i < rows.size(); i++) {
+                String[] row = rows.get(i);
+                String normalizedName = row[0] == null ? "" : row[0].replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+                String duplicateKey = row[2] + "|" + normalizedName + "|" + row[1];
+                boolean duplicate = !seenTransfers.add(duplicateKey);
+                appendXlsxRow(sheet, i + 2, row, false, duplicate);
+            }
             sheet.append("</sheetData></worksheet>");
             putZipText(zip, "xl/worksheets/sheet1.xml", sheet.toString());
         }
         return buffer.toByteArray();
     }
 
-    private void appendXlsxRow(StringBuilder xml, int rowNumber, String[] values, boolean header) {
+    private void appendXlsxRow(StringBuilder xml, int rowNumber, String[] values, boolean header, boolean duplicate) {
         xml.append("<row r=\"").append(rowNumber).append("\">");
         for (int col = 0; col < values.length; col++) {
             String ref = String.valueOf((char)('A' + col)) + rowNumber;
