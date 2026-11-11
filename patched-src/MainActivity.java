@@ -344,6 +344,28 @@ public class MainActivity extends Activity {
                         out.getFD().sync();
                     }
                 }
+                // Read the actual MediaStore file back before publishing it. This catches
+                // providers that report a successful write but expose an empty workbook.
+                File readBack = new File(getCacheDir(), fileName + ".readback");
+                try {
+                    try (java.io.InputStream in = resolver.openInputStream(newFile)) {
+                        if (in == null) throw new Exception("تعذر إعادة قراءة ملف XLSX بعد الكتابة");
+                        try (FileOutputStream out = new FileOutputStream(readBack, false)) {
+                            byte[] chunk = new byte[8192];
+                            int count;
+                            while ((count = in.read(chunk)) != -1) out.write(chunk, 0, count);
+                            out.flush();
+                            out.getFD().sync();
+                        }
+                    }
+                    if (readBack.length() != bytes.length) {
+                        throw new Exception("حجم الملف بعد الحفظ لا يطابق البيانات؛ المتوقع "
+                                + bytes.length + " والفعلي " + readBack.length());
+                    }
+                    validateXlsx(readBack, rows.size());
+                } finally {
+                    if (readBack.exists()) readBack.delete();
+                }
                 ContentValues publish = new ContentValues();
                 publish.put(MediaStore.MediaColumns.IS_PENDING, 0);
                 int changed = resolver.update(newFile, publish, null, null);
