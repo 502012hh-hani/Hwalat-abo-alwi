@@ -472,17 +472,17 @@ public class MainActivity extends Activity {
                     + "</Relationships>");
 
             putZipText(zip, "xl/styles.xml",
-                    "<?xml version=\\"1.0\\" encoding=\\"UTF-8\\" standalone=\\"yes\\"?>"
-                    + "<styleSheet xmlns=\\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\\">"
-                    + "<fonts count=\\"1\\"><font><sz val=\\"11\\"/><name val=\\"Calibri\\"/></font></fonts>"
-                    + "<fills count=\\"3\\"><fill><patternFill patternType=\\"none\\"/></fill>"
-                    + "<fill><patternFill patternType=\\"gray125\\"/></fill>"
-                    + "<fill><patternFill patternType=\\"solid\\"><fgColor rgb=\\"FFFFFF00\\"/><bgColor indexed=\\"64\\"/></patternFill></fill></fills>"
-                    + "<borders count=\\"1\\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>"
-                    + "<cellStyleXfs count=\\"1\\"><xf numFmtId=\\"0\\" fontId=\\"0\\" fillId=\\"0\\" borderId=\\"0\\"/></cellStyleXfs>"
-                    + "<cellXfs count=\\"2\\"><xf numFmtId=\\"0\\" fontId=\\"0\\" fillId=\\"0\\" borderId=\\"0\\" xfId=\\"0\\"/>"
-                    + "<xf numFmtId=\\"0\\" fontId=\\"0\\" fillId=\\"2\\" borderId=\\"0\\" xfId=\\"0\\" applyFill=\\"1\\"/></cellXfs>"
-                    + "<cellStyles count=\\"1\\"><cellStyle name=\\"Normal\\" xfId=\\"0\\" builtinId=\\"0\\"/></cellStyles></styleSheet>");
+                    "<?xml version='1.0' encoding='UTF-8' standalone='yes'?>"
+                    + "<styleSheet xmlns='http://schemas.openxmlformats.org/spreadsheetml/2006/main'>"
+                    + "<fonts count='1'><font><sz val='11'/><name val='Calibri'/></font></fonts>"
+                    + "<fills count='3'><fill><patternFill patternType='none'/></fill>"
+                    + "<fill><patternFill patternType='gray125'/></fill>"
+                    + "<fill><patternFill patternType='solid'><fgColor rgb='FFFFFF00'/><bgColor indexed='64'/></patternFill></fill></fills>"
+                    + "<borders count='1'><border><left/><right/><top/><bottom/><diagonal/></border></borders>"
+                    + "<cellStyleXfs count='1'><xf numFmtId='0' fontId='0' fillId='0' borderId='0'/></cellStyleXfs>"
+                    + "<cellXfs count='2'><xf numFmtId='0' fontId='0' fillId='0' borderId='0' xfId='0'/>"
+                    + "<xf numFmtId='0' fontId='0' fillId='2' borderId='0' xfId='0' applyFill='1'/></cellXfs>"
+                    + "<cellStyles count='1'><cellStyle name='Normal' xfId='0' builtinId='0'/></cellStyles></styleSheet>");
 
             StringBuilder sheet = new StringBuilder();
             sheet.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
@@ -504,15 +504,19 @@ public class MainActivity extends Activity {
     }
 
     private void appendXlsxRow(StringBuilder xml, int rowNumber, String[] values, boolean header, boolean duplicate) {
-        xml.append("<row r=\\"").append(rowNumber).append("\\">");
+        String q = String.valueOf((char) 34);
+        xml.append("<row r=").append(q).append(rowNumber).append(q).append(">");
         for (int col = 0; col < values.length; col++) {
             String ref = String.valueOf((char)('A' + col)) + rowNumber;
             String value = values[col] == null ? "" : values[col];
-            String style = duplicate ? " s=\\"1\\"" : "";
+            String style = duplicate ? " s=" + q + "1" + q : "";
             if (!header && col == 1 && value.matches("[0-9]+")) {
-                xml.append("<c r=\\"").append(ref).append("\\"").append(style).append("><v>").append(value).append("</v></c>");
+                xml.append("<c r=").append(q).append(ref).append(q).append(style)
+                   .append("><v>").append(value).append("</v></c>");
             } else {
-                xml.append("<c r=\\"").append(ref).append("\\"").append(style).append(" t=\\"inlineStr\\"><is><t xml:space=\\"preserve\\">")
+                xml.append("<c r=").append(q).append(ref).append(q).append(style)
+                   .append(" t=").append(q).append("inlineStr").append(q)
+                   .append("><is><t xml:space=").append(q).append("preserve").append(q).append(">")
                    .append(xmlEscape(value)).append("</t></is></c>");
             }
         }
