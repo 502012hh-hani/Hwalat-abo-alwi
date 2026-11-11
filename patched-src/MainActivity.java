@@ -99,7 +99,7 @@ public class MainActivity extends Activity {
         TextView note = new TextView(this);
         note.setTextSize(13);
         note.setPadding(4, 12, 4, 20);
-        note.setText("ملاحظة: يقرأ التطبيق إشعارات واتساب التي يسمح النظام بعرضها فقط، ولا يفتح محادثات واتساب مباشرة. ملفات CSV تفتح ببرنامج Excel.");
+        note.setText("ملاحظة: يقرأ التطبيق إشعارات واتساب التي يسمح النظام بعرضها فقط، ولا يفتح محادثات واتساب مباشرة. يتم تصدير ملفات Excel بصيغة XLSX.");
         layout.addView(note);
 
         setContentView(scroll);
@@ -305,20 +305,11 @@ public class MainActivity extends Activity {
                 out.getFD().sync();
             }
 
-            stage = "التحقق من بنية ملف Excel";
-            boolean workbookFound = false;
-            boolean sheetFound = false;
-            try (java.util.zip.ZipInputStream zin = new java.util.zip.ZipInputStream(
-                    new java.io.FileInputStream(temp), StandardCharsets.UTF_8)) {
-                java.util.zip.ZipEntry entry;
-                while ((entry = zin.getNextEntry()) != null) {
-                    if ("xl/workbook.xml".equals(entry.getName())) workbookFound = true;
-                    if ("xl/worksheets/sheet1.xml".equals(entry.getName())) sheetFound = true;
-                }
+            stage = "التحقق من بنية ومحتوى ملف Excel";
+            if (!temp.isFile() || temp.length() != bytes.length) {
+                throw new Exception("حجم الملف المؤقت لا يطابق البيانات المكتوبة");
             }
-            if (!temp.isFile() || temp.length() != bytes.length || !workbookFound || !sheetFound) {
-                throw new Exception("ملف XLSX غير مكتمل؛ workbook=" + workbookFound + ", sheet=" + sheetFound);
-            }
+            validateXlsx(temp, rows.size());
 
             stage = "استبدال ملف اليوم مع الاحتفاظ بالنسخة السابقة";
             if (backup.exists() && !backup.delete()) {
@@ -349,6 +340,50 @@ public class MainActivity extends Activity {
             String detail = ex.getMessage();
             if (detail == null || detail.trim().isEmpty()) detail = ex.getClass().getSimpleName();
             throw new Exception(stage + " — " + ex.getClass().getSimpleName() + ": " + detail, ex);
+        }
+    }
+
+    private void validateXlsx(File file, int expectedDataRows) throws Exception {
+        java.util.HashSet<String> required = new java.util.HashSet<>();
+        required.add("[Content_Types].xml");
+        required.add("_rels/.rels");
+        required.add("xl/workbook.xml");
+        required.add("xl/_rels/workbook.xml.rels");
+        required.add("xl/worksheets/sheet1.xml");
+        int worksheetRows = -1;
+        int workbookSheets = 0;
+        String spreadsheetNs = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        try (java.util.zip.ZipInputStream zin = new java.util.zip.ZipInputStream(
+                new java.io.FileInputStream(file), StandardCharsets.UTF_8)) {
+            java.util.zip.ZipEntry entry;
+            while ((entry = zin.getNextEntry()) != null) {
+                String name = entry.getName();
+                java.io.ByteArrayOutputStream content = new java.io.ByteArrayOutputStream();
+                byte[] chunk = new byte[4096];
+                int read;
+                while ((read = zin.read(chunk)) != -1) content.write(chunk, 0, read);
+                if (required.contains(name)) required.remove(name);
+                if (name.endsWith(".xml") || name.endsWith(".rels")) {
+                    javax.xml.parsers.DocumentBuilderFactory factory =
+                            javax.xml.parsers.DocumentBuilderFactory.newInstance();
+                    factory.setNamespaceAware(true);
+                    try { factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true); }
+                    catch (Exception ignored) {}
+                    org.w3c.dom.Document document = factory.newDocumentBuilder().parse(
+                            new java.io.ByteArrayInputStream(content.toByteArray()));
+                    if ("xl/workbook.xml".equals(name)) {
+                        workbookSheets = document.getElementsByTagNameNS(spreadsheetNs, "sheet").getLength();
+                    } else if ("xl/worksheets/sheet1.xml".equals(name)) {
+                        worksheetRows = document.getElementsByTagNameNS(spreadsheetNs, "row").getLength();
+                    }
+                }
+            }
+        }
+        if (!required.isEmpty()) throw new Exception("أجزاء XLSX الأساسية مفقودة: " + required);
+        if (workbookSheets < 1) throw new Exception("ملف Excel لا يحتوي ورقة عمل");
+        if (worksheetRows != expectedDataRows + 1) {
+            throw new Exception("عدد صفوف Excel غير مطابق؛ المتوقع "
+                    + (expectedDataRows + 1) + " والفعلي " + worksheetRows);
         }
     }
 
