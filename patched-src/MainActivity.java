@@ -371,29 +371,31 @@ public class MainActivity extends Activity {
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
                 values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
                 values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                Exception downloadsInsertError = null;
                 try {
                     targetFile = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
                 } catch (Exception insertError) {
-                    // Retry the exact-name lookup in case the provider committed the row
-                    // but failed while returning its URI.
-                    try (Cursor cursor = resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                            projection, MediaStore.MediaColumns.DISPLAY_NAME + "=?",
-                            new String[]{fileName}, MediaStore.MediaColumns.DATE_MODIFIED + " DESC")) {
-                        if (cursor != null && cursor.moveToFirst()) {
-                            int idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
-                            targetFile = Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                                    String.valueOf(cursor.getLong(idColumn)));
-                        }
-                    } catch (Exception lookupError) {
-                        insertError.addSuppressed(lookupError);
-                    }
-                    if (targetFile == null) {
-                        android.util.Log.e("HawalatExport", "MediaStore INSERT failed for " + fileName, insertError);
-                        throw new Exception("تعذر إنشاء ملف Excel في التنزيلات: "
-                                + insertError.getClass().getSimpleName() + ": " + insertError.getMessage(), insertError);
+                    downloadsInsertError = insertError;
+                    android.util.Log.w("HawalatExport", "Downloads collection insert failed; trying Files collection", insertError);
+                }
+
+                // Android 10/MIUI may return null for Downloads.EXTERNAL_CONTENT_URI.
+                // Retry through the general external Files collection, preserving the
+                // same public Downloads folder and filename.
+                if (targetFile == null) {
+                    try {
+                        targetFile = resolver.insert(MediaStore.Files.getContentUri("external"), values);
+                    } catch (Exception filesInsertError) {
+                        if (downloadsInsertError != null) filesInsertError.addSuppressed(downloadsInsertError);
+                        android.util.Log.e("HawalatExport", "Both MediaStore insert collections failed for " + fileName, filesInsertError);
+                        throw new Exception("تعذر إنشاء ملف Excel عبر MediaStore: "
+                                + filesInsertError.getClass().getSimpleName() + ": " + filesInsertError.getMessage(), filesInsertError);
                     }
                 }
-                if (targetFile == null) throw new Exception("تعذر إنشاء ملف Excel في التنزيلات؛ لم يُرجع MediaStore عنوان الملف");
+                if (targetFile == null) {
+                    android.util.Log.e("HawalatExport", "Downloads and Files MediaStore insert both returned null for " + fileName);
+                    throw new Exception("تعذر إنشاء ملف Excel: أعاد كل من Downloads وFiles عنواناً فارغاً من MediaStore");
+                }
                 inserted = true;
             } else {
                 ContentValues pending = new ContentValues();
