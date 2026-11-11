@@ -150,11 +150,11 @@ jobs:
                   }
               }
           '''
-              m = re.search(r'android\\s*\\{', s)
+              m = re.search(r'android\s*\{', s)
               if not m:
                   raise SystemExit("Could not locate android { block in app/build.gradle")
               pos = m.end()
-              s = s[:pos] + "\\n" + block + s[pos:]
+              s = s[:pos] + "\n" + block + s[pos:]
           p.write_text(s)
           print("Permanent release signing configured")
           PY
