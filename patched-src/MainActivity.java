@@ -135,16 +135,16 @@ public class MainActivity extends Activity {
     private void showEntries() {
         String a = getSharedPreferences("hawalat", MODE_PRIVATE).getString("rows_العمقي", "");
         String b = getSharedPreferences("hawalat", MODE_PRIVATE).getString("rows_بن دول » محمد علوي احمد", "");
-        String raw = getSharedPreferences("hawalat", MODE_PRIVATE).getString("debug_last_notification", "لم يصل أي إشعار واتساب إلى خدمة التطبيق بعد.");
+        String raw = "مخفية لحماية بيانات المستلمين؛ يعرض التطبيق الاسم والمبلغ والتاريخ والوقت فقط.";
         String listener = getSharedPreferences("hawalat", MODE_PRIVATE).getString("listener_state", "لم تسجل الخدمة اتصالها بالنظام بعد");
         String callbackPackage = getSharedPreferences("hawalat", MODE_PRIVATE).getString("last_callback_package", "لم يصل أي callback بعد");
         long callbackTime = getSharedPreferences("hawalat", MODE_PRIVATE).getLong("last_callback_time", 0L);
         String callbackStamp = callbackTime == 0L ? "غير متوفر" : new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(callbackTime));
-        String systemDebug = getSharedPreferences("hawalat", MODE_PRIVATE).getString("debug_last_system_notification", "لا توجد إشعارات نظام مسجلة");
-        String callbackHistory = getSharedPreferences("hawalat", MODE_PRIVATE).getString("callback_history", "لا يوجد سجل callbacks بعد");
+        String systemDebug = "معلومات الإشعارات التفصيلية مخفية؛ لا يتم عرض محتوى الرسائل أو الصور أو أرقام الهواتف.";
+        String callbackHistory = "سجل محتوى الإشعارات مخفي لحماية الخصوصية.";
         String probeTime = getSharedPreferences("hawalat", MODE_PRIVATE).getString("active_probe_time", "لم يبدأ");
         String probePackages = getSharedPreferences("hawalat", MODE_PRIVATE).getString("active_probe_packages", "غير متوفر");
-        String probeDetails = getSharedPreferences("hawalat", MODE_PRIVATE).getString("active_probe_whatsapp_details", "لا توجد");
+        String probeDetails = "تم رصد إشعار واتساب دون عرض محتواه.";
         boolean probeWhatsApp = getSharedPreferences("hawalat", MODE_PRIVATE).getBoolean("active_probe_whatsapp_found", false);
         int probeCount = getSharedPreferences("hawalat", MODE_PRIVATE).getInt("active_probe_count", 0);
         String probeError = getSharedPreferences("hawalat", MODE_PRIVATE).getString("active_probe_error", "لا يوجد");
@@ -162,7 +162,7 @@ public class MainActivity extends Activity {
                 "\n\nتفاصيل سجلات مجموعة العمقي:\n" + formatEntries(a) +
                 "\n\nتفاصيل سجلات مجموعة بن دول:\n" + formatEntries(b) +
                 "\n\nآخر حالة معالجة:\n" + getSharedPreferences("hawalat", MODE_PRIVATE).getString("last_status", "لا توجد") +
-                "\n\nآخر إشعار واتساب وصل للتطبيق:\n" + raw
+                "\n\nملاحظة الخصوصية:\n" + raw
         );
     }
 
@@ -183,11 +183,11 @@ public class MainActivity extends Activity {
             }
         });
         StringBuilder table = new StringBuilder();
-        table.append("اسم المستلم                 | المبلغ | الوقت | التاريخ\\n");
-        table.append("------------------------------------------------\\n");
+        table.append("اسم المستلم                 | المبلغ | الوقت | التاريخ\n");
+        table.append("------------------------------------------------\n");
         for (String[] p : rows) {
             table.append(p[2]).append(" | ").append(p[3]).append(" | ")
-                 .append(p[1]).append(" | ").append(p[0]).append("\\n");
+                 .append(p[1]).append(" | ").append(p[0]).append("\n");
         }
         if (rows.isEmpty()) table.append("لا توجد حوالات مكتملة مسجلة حتى الآن.");
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -223,9 +223,9 @@ public class MainActivity extends Activity {
             String[] p = rows[i].split("\\t", -1);
             if (p.length >= 4) {
                 out.append(i + 1).append(") اسم المستلم: ").append(p[2])
-                   .append("\\n   المبلغ: ").append(p[3])
-                   .append("\\n   التاريخ: ").append(p[0])
-                   .append("\\n   الوقت: ").append(p[1]).append("\\n\\n");
+                   .append("\n   المبلغ: ").append(p[3])
+                   .append("\n   التاريخ: ").append(p[0])
+                   .append("\n   الوقت: ").append(p[1]).append("\n\n");
             }
         }
         return out.length() == 0 ? "لا توجد حوالات مكتملة؛ قد تكون هناك رسالة بانتظار الجزء الآخر." : out.toString();
