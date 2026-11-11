@@ -44,6 +44,7 @@ jobs:
           mkdir -p app/src/main/java/com/abualawi/hawalat
           cp patched-src/MainActivity.java app/src/main/java/com/abualawi/hawalat/MainActivity.java
           cp patched-src/WhatsAppNotificationListener.java app/src/main/java/com/abualawi/hawalat/WhatsAppNotificationListener.java
+          cp patched-src/KeepAliveService.java app/src/main/java/com/abualawi/hawalat/KeepAliveService.java
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           from pathlib import Path
@@ -74,19 +75,33 @@ jobs:
           if not has_action:
               filt = ET.SubElement(service, "intent-filter")
               ET.SubElement(filt, "action").set(android + "name", "android.service.notification.NotificationListenerService")
+          keepalive = None
+          for item in app.findall("service"):
+              if item.get(android + "name", "") in (".KeepAliveService", "com.abualawi.hawalat.KeepAliveService"):
+                  keepalive = item
+                  break
+          if keepalive is None:
+              keepalive = ET.SubElement(app, "service")
+              keepalive.set(android + "name", ".KeepAliveService")
+          keepalive.set(android + "exported", "false")
           tree.write(p, encoding="utf-8", xml_declaration=True)
-          print("Notification listener manifest declaration verified and repaired")
+          print("Notification listener and foreground keep-alive services verified")
           PY
           python3 - <<'PY'
           from pathlib import Path
           p = Path("app/src/main/AndroidManifest.xml")
           s = p.read_text()
-          permission = '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />'
-          if permission not in s:
-              end = s.find(">", s.find("<manifest"))
-              if end < 0:
-                  raise SystemExit("Manifest opening tag not found")
-              s = s[:end + 1] + "\\n    " + permission + s[end + 1:]
+          permissions = [
+              '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />',
+              '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />'
+          ]
+          end = s.find(">", s.find("<manifest"))
+          if end < 0:
+              raise SystemExit("Manifest opening tag not found")
+          for permission in permissions:
+              if permission not in s:
+                  s = s[:end + 1] + "\\n    " + permission + s[end + 1:]
+                  end = s.find(">", s.find("<manifest"))
           p.write_text(s)
           PY
 
