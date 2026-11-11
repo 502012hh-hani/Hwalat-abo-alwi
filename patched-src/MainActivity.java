@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        startBackgroundMonitor();
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -109,8 +110,18 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        startBackgroundMonitor();
         updateStatus();
         showEntries();
+    }
+
+    private void startBackgroundMonitor() {
+        try {
+            Intent service = new Intent(this, KeepAliveService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+        } catch (Exception ex) {
+            getSharedPreferences("hawalat", MODE_PRIVATE).edit().putString("watchdog_status", "تعذر تشغيل مراقبة الخلفية: " + ex.getClass().getSimpleName()).apply();
+        }
     }
 
     private void updateStatus() {
@@ -146,6 +157,7 @@ public class MainActivity extends Activity {
                 "\n\nآخر callback استلمه Android:\nالتطبيق: " + callbackPackage + "\nالوقت: " + callbackStamp +
                 "\n\nآخر إشعار نظام (للتشخيص):\n" + systemDebug +
                 "\n\nفحص الإشعارات النشطة كل 5 ثوانٍ:\nآخر فحص: " + probeTime + "\nعدد الإشعارات: " + probeCount + "\nواتساب نشط؟ " + (probeWhatsApp ? "نعم" : "لا") + "\nالحزم النشطة: " + probePackages + "\nتفاصيل واتساب: " + probeDetails + "\nخطأ الفحص: " + probeError +
+                "\n\nحالة مراقبة الخلفية:\n" + getSharedPreferences("hawalat", MODE_PRIVATE).getString("watchdog_status", "لم تبدأ بعد") +
                 "\n\nسجل آخر 15 إشعاراً استلمه Android:\n" + callbackHistory +
                 "\n\nتفاصيل سجلات مجموعة العمقي:\n" + formatEntries(a) +
                 "\n\nتفاصيل سجلات مجموعة بن دول:\n" + formatEntries(b) +
