@@ -121,6 +121,55 @@ jobs:
           print("Android 10 storage permission declaration verified")
           PY
 
+      - name: Apply Abu Talal app name and launcher icon
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-core
+          python3 -m pip install --user pillow
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          from PIL import Image, ImageDraw, ImageFont
+          root = Path("app/src/main")
+          manifest = root / "AndroidManifest.xml"
+          android = "{http://schemas.android.com/apk/res/android}"
+          ET.register_namespace("android", "http://schemas.android.com/apk/res/android")
+          tree = ET.parse(manifest)
+          app = tree.getroot().find("application")
+          if app is None:
+              raise SystemExit("Manifest application element is missing")
+          app.set(android + "label", "أبو طلال")
+          app.set(android + "icon", "@mipmap/ic_launcher")
+          tree.write(manifest, encoding="utf-8", xml_declaration=True)
+          font_path = subprocess.check_output(
+              ["fc-match", "Noto Sans Arabic:style=Bold", "-f", "%{file}"],
+              text=True
+          ).strip()
+          if not font_path or not Path(font_path).is_file():
+              raise SystemExit("Arabic font for launcher icon was not found")
+          for density, size in [("mdpi",48),("hdpi",72),("xhdpi",96),("xxhdpi",144),("xxxhdpi",192)]:
+              image = Image.new("RGB", (size, size), (12, 28, 48))
+              draw = ImageDraw.Draw(image)
+              scale = size / 192
+              margin = max(2, int(7 * scale))
+              draw.rounded_rectangle((margin, margin, size-margin, size-margin),
+                                     radius=int(34*scale), fill=(12,28,48),
+                                     outline=(226,184,92), width=max(1,int(4*scale)))
+              draw.ellipse((int(22*scale),int(22*scale),int(170*scale),int(170*scale)),
+                           outline=(226,184,92), width=max(1,int(2*scale)))
+              font = ImageFont.truetype(font_path, max(8,int(31*scale)))
+              draw.text((size/2,size/2), "أبو طلال", font=font, fill=(255,245,220),
+                        anchor="mm", direction="rtl", language="ar",
+                        stroke_width=max(0,int(scale)), stroke_fill=(12,28,48))
+              out = root / "res" / ("mipmap-" + density) / "ic_launcher.png"
+              out.parent.mkdir(parents=True, exist_ok=True)
+              image.save(out, format="PNG", optimize=True)
+          print("App label and Arabic launcher icon set to أبو طلال")
+          PY
+
       - name: Build APK
         run: gradle --no-daemon :app:assembleDebug
 
