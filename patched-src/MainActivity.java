@@ -467,10 +467,8 @@ public class MainActivity extends Activity {
             java.util.HashSet<Integer> duplicateRows = new java.util.HashSet<>();
             for (Integer index : chronological) {
                 String[] row = rows.get(index);
-                String normalizedName = normalizeArabic(row[0] == null ? "" : row[0])
-                        .replaceAll("[^\\p{IsArabic}0-9]", "").toLowerCase(Locale.ROOT);
-                String normalizedAmount = normalize(row[1] == null ? "" : row[1])
-                        .replaceAll("[^0-9]", "");
+                String normalizedName = normalizeDuplicateName(row[0]);
+                String normalizedAmount = normalizeDuplicateAmount(row[1]);
                 String duplicateKey = row[2] + "|" + normalizedName + "|" + normalizedAmount;
                 if (!seenTransfers.add(duplicateKey)) duplicateRows.add(index);
             }
@@ -481,6 +479,24 @@ public class MainActivity extends Activity {
             putZipText(zip, "xl/worksheets/sheet1.xml", sheet.toString());
         }
         return buffer.toByteArray();
+    }
+
+    private String normalizeDuplicateName(String value) {
+        if (value == null) return "";
+        return value.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا')
+                .replace('ى', 'ي').replaceAll("[\\u064B-\\u065F\\u0670]", "")
+                .replaceAll("[^\\p{IsArabic}0-9]", "").toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizeDuplicateAmount(String value) {
+        if (value == null) return "";
+        String digits = value.replace('٠','0').replace('١','1').replace('٢','2')
+                .replace('٣','3').replace('٤','4').replace('٥','5')
+                .replace('٦','6').replace('٧','7').replace('٨','8').replace('٩','9')
+                .replace('۰','0').replace('۱','1').replace('۲','2')
+                .replace('۳','3').replace('۴','4').replace('۵','5')
+                .replace('۶','6').replace('۷','7').replace('۸','8').replace('۹','9');
+        return digits.replaceAll("[^0-9]", "");
     }
 
     private void appendXlsxRow(StringBuilder xml, int rowNumber, String[] values, boolean header, boolean duplicate) {
