@@ -100,7 +100,7 @@ jobs:
           p = Path("app/src/main/AndroidManifest.xml")
           s = p.read_text()
           permissions = [
-              '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />',
+              '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />',
               '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />'
           ]
           end = s.find(">", s.find("<manifest"))
@@ -111,6 +111,12 @@ jobs:
                   s = s[:end + 1] + "\n    " + permission + s[end + 1:]
                   end = s.find(">", s.find("<manifest"))
           p.write_text(s)
+          # Fail the build if Android 10 storage permission is missing or capped below API 29.
+          check = ET.parse(p).getroot()
+          storage = [x for x in check.findall("uses-permission") if x.get(android + "name") == "android.permission.WRITE_EXTERNAL_STORAGE"]
+          if not storage or storage[0].get(android + "maxSdkVersion") != "29":
+              raise SystemExit("WRITE_EXTERNAL_STORAGE must be declared through Android 10 (API 29)")
+          print("Android 10 storage permission declaration verified")
           PY
 
       - name: Build APK
