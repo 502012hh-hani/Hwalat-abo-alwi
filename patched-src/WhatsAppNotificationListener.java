@@ -30,6 +30,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         cleanStoredRows();
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("listener_state", "متصل بالنظام")
+                .putLong("listener_connected_at_ms", System.currentTimeMillis())
                 .putString("last_status", "خدمة استقبال الإشعارات متصلة بالنظام؛ يجري فحص الإشعارات النشطة كل 5 ثوانٍ")
                 .apply();
         diagnosticHandler.removeCallbacks(activeNotificationProbe);
@@ -146,6 +147,12 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             String previous = prefs.getString(key, null);
             if (previous == null) {
                 prefs.edit().putString(key, signature).apply();
+                // Recover a notification posted after this listener connection if
+                // Android did not deliver onNotificationPosted for it.
+                long connectedAt = prefs.getLong("listener_connected_at_ms", 0L);
+                if (connectedAt > 0L && sbn.getPostTime() >= connectedAt - 2000L) {
+                    handleNotificationPosted(sbn, false);
+                }
             } else if (!previous.equals(signature)) {
                 prefs.edit().putString(key, signature).apply();
                 handleNotificationPosted(sbn, false);
@@ -155,6 +162,16 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
     private void handleNotificationPosted(StatusBarNotification sbn, boolean recordCallback) {
         if (sbn == null) return;
+        // Record raw Android callback arrival before filtering by app, group, or sender.
+        // This makes the diagnostic truthful even when the notification is unrelated.
+        if (recordCallback) {
+            android.content.SharedPreferences rawPrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+            rawPrefs.edit()
+                    .putString("last_callback_package", sbn.getPackageName())
+                    .putLong("last_callback_time", sbn.getPostTime())
+                    .putInt("callback_count", rawPrefs.getInt("callback_count", 0) + 1)
+                    .apply();
+        }
         Notification n = sbn.getNotification();
         Bundle e = (n == null) ? null : n.extras;
         String packageName = sbn.getPackageName();
@@ -226,12 +243,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             limitedHistory.append(historyLines[i]);
         }
         android.content.SharedPreferences.Editor diagnostic = prefs.edit();
-        // Polling is a fallback path and must not be mislabeled as an Android callback.
-        if (recordCallback) {
-            diagnostic.putString("last_callback_package", packageName)
-                    .putLong("last_callback_time", posted)
-                    .putString("callback_history", limitedHistory.toString());
-        }
+        // Callback arrival is recorded above before filtering; polling never increments it.
         if (whatsappPackage) {
             diagnostic.putString("debug_last_notification", debug)
                     .putString("last_whatsapp_notification_time", stamp);
