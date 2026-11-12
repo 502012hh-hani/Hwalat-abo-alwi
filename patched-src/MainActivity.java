@@ -337,20 +337,35 @@ public class MainActivity extends Activity {
                 throw new Exception("تعذر حفظ نسخة احتياطية من ملف اليوم: " + target.getName());
             }
             if (!temp.renameTo(target)) {
-                if (hadTarget && backup.exists()) backup.renameTo(target);
                 throw new Exception("تعذر اعتماد ملف Excel في التنزيلات: " + target.getAbsolutePath());
             }
-            if (backup.exists()) backup.delete();
             if (!target.isFile() || target.length() != bytes.length) {
                 throw new Exception("تم إنشاء الملف لكن حجمه بعد الحفظ غير مطابق");
             }
+            // Keep the previous workbook until the final public Downloads copy
+            // has passed the same XLSX and row-count validation as the temp file.
             validateXlsx(target, rows.size());
+            if (backup.exists() && !backup.delete()) {
+                android.util.Log.w("HawalatExport", "Verified workbook saved; old backup retained at "
+                        + backup.getAbsolutePath());
+            }
             android.util.Log.i("HawalatExport", "Direct XLSX saved: "
                     + target.getAbsolutePath() + ", rows=" + rows.size() + ", bytes=" + bytes.length);
             return rows.size();
         } catch (Exception ex) {
             if (temp.exists()) temp.delete();
-            if (!target.exists() && backup.exists()) backup.renameTo(target);
+            if (hadTarget && backup.exists()) {
+                if (target.exists() && !target.delete()) {
+                    android.util.Log.e("HawalatExport", "Could not remove invalid replacement: "
+                            + target.getAbsolutePath());
+                }
+                if (!target.exists() && !backup.renameTo(target)) {
+                    android.util.Log.e("HawalatExport", "Could not restore previous workbook from: "
+                            + backup.getAbsolutePath());
+                }
+            } else if (!hadTarget && target.exists()) {
+                target.delete();
+            }
             throw ex;
         }
     }
