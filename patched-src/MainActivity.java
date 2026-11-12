@@ -451,13 +451,31 @@ public class MainActivity extends Activity {
                  .append("<sheetFormatPr defaultRowHeight=" + q + "18" + q + "/><sheetData>");
             String[] headers = {"اسم المستلم", "المبلغ", "التاريخ", "الوقت"};
             appendXlsxRow(sheet, 1, headers, true, false);
+
+            // Rows are stored newest-first. Determine duplicate status in chronological
+            // order so the first transfer stays normal and each later repeat is yellow.
+            ArrayList<Integer> chronological = new ArrayList<>();
+            for (int i = 0; i < rows.size(); i++) chronological.add(i);
+            Collections.sort(chronological, new Comparator<Integer>() {
+                @Override public int compare(Integer left, Integer right) {
+                    int byTime = rows.get(left)[3].compareTo(rows.get(right)[3]);
+                    if (byTime != 0) return byTime;
+                    return Integer.compare(right, left);
+                }
+            });
             java.util.HashSet<String> seenTransfers = new java.util.HashSet<>();
+            java.util.HashSet<Integer> duplicateRows = new java.util.HashSet<>();
+            for (Integer index : chronological) {
+                String[] row = rows.get(index);
+                String normalizedName = normalizeArabic(row[0] == null ? "" : row[0])
+                        .replaceAll("[^\\p{IsArabic}0-9]", "").toLowerCase(Locale.ROOT);
+                String normalizedAmount = normalize(row[1] == null ? "" : row[1])
+                        .replaceAll("[^0-9]", "");
+                String duplicateKey = row[2] + "|" + normalizedName + "|" + normalizedAmount;
+                if (!seenTransfers.add(duplicateKey)) duplicateRows.add(index);
+            }
             for (int i = 0; i < rows.size(); i++) {
-                String[] row = rows.get(i);
-                String normalizedName = row[0] == null ? "" : row[0].replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
-                String duplicateKey = row[2] + "|" + normalizedName + "|" + row[1];
-                boolean duplicate = !seenTransfers.add(duplicateKey);
-                appendXlsxRow(sheet, i + 2, row, false, duplicate);
+                appendXlsxRow(sheet, i + 2, rows.get(i), false, duplicateRows.contains(i));
             }
             sheet.append("</sheetData></worksheet>");
             putZipText(zip, "xl/worksheets/sheet1.xml", sheet.toString());
