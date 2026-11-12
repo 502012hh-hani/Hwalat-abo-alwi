@@ -48,7 +48,7 @@ public class MainActivity extends Activity {
         scroll.addView(layout);
 
         TextView title = new TextView(this);
-        title.setText("حوالات أبو علوي");
+        title.setText("أبو طلال");
         title.setTextSize(27);
         title.setGravity(17);
         title.setPadding(0, 8, 0, 20);
@@ -264,7 +264,7 @@ public class MainActivity extends Activity {
                 }
             }
             if (files == 0) throw new Exception("لا توجد سجلات صالحة للتصدير");
-            Toast.makeText(this, "تم تحديث ملفات الحوالات حسب تواريخها (" + files + " ملف، " + total + " سجل). افتح Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "تم تحديث ملفات الحوالات حسب تواريخها (" + files + " ملف، " + total + " سجل). افتح Download/أبو طلال", Toast.LENGTH_LONG).show();
         } catch (Exception ex) {
             String reason = ex.getMessage();
             if (reason == null || reason.trim().isEmpty()) reason = ex.getClass().getSimpleName();
@@ -298,7 +298,7 @@ public class MainActivity extends Activity {
         }
 
         File downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-        File dir = new File(downloads, "حوالات أبو علوي");
+        File dir = new File(downloads, "أبو طلال");
         if (!dir.exists() && !dir.mkdirs() && !dir.isDirectory()) {
             throw new Exception("تعذر إنشاء مجلد التنزيلات: " + dir.getAbsolutePath());
         }
