@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Locale;
+import java.util.TreeSet;
 
 public class MainActivity extends Activity {
     private TextView status, entries;
@@ -205,20 +206,18 @@ public class MainActivity extends Activity {
 
     private void exportOneGroup(String label, String prefKey) {
         try {
-            String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
-            int n;
-            if (Build.VERSION.SDK_INT >= 29) {
-                // Use the same scoped-storage-safe MediaStore path as bulk export.
-                n = writeGroupToDownloads(label, prefKey, today);
-            } else {
-                if (!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
-                    throw new Exception("التخزين غير متاح");
-                }
-                File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "حوالات أبو علوي");
+            TreeSet<String> dates = getStoredDates(prefKey);
+            if (dates.isEmpty()) throw new Exception("لا توجد سجلات صالحة للتصدير");
+            int total = 0;
+            if (Build.VERSION.SDK_INT < 29) {
+                if (!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) throw new Exception("التخزين غير متاح");
+                File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "حوالات أبو علوي");
                 if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد التصدير");
-                n = writeGroup(dir, label, prefKey, today);
+                for (String date : dates) total += writeGroup(dir, label, prefKey, date);
+            } else {
+                for (String date : dates) total += writeGroupToDownloads(label, prefKey, date);
             }
-            Toast.makeText(this, "تم إنشاء ملف Excel حقيقي (" + n + " سجل) في Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "تم تحديث ملفات " + label + " حسب تواريخ الحوالات (" + dates.size() + " ملف، " + total + " سجل)", Toast.LENGTH_LONG).show();
         } catch (Exception ex) {
             String reason = ex.getMessage();
             if (reason == null || reason.trim().isEmpty()) reason = ex.getClass().getSimpleName();
@@ -247,23 +246,44 @@ public class MainActivity extends Activity {
         return s.split("\\n").length;
     }
 
-    private void exportFiles() {
-        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
-        try {
-            int total;
-            if (Build.VERSION.SDK_INT >= 29) {
-                total = writeGroupToDownloads("العمقي", "rows_العمقي", today)
-                        + writeGroupToDownloads("بن دول", "rows_بن دول » محمد علوي احمد", today);
-            } else {
-                if (!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
-                    throw new Exception("التخزين الخارجي غير متاح");
-                }
-                File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "حوالات أبو علوي");
-                if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد Download؛ تحقق من مساحة التخزين");
-                total = writeGroup(dir, "العمقي", "rows_العمقي", today)
-                        + writeGroup(dir, "بن دول", "rows_بن دول » محمد علوي احمد", today);
+    private TreeSet<String> getStoredDates(String prefKey) {
+        TreeSet<String> dates = new TreeSet<>();
+        String data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
+        if (!TextUtils.isEmpty(data)) {
+            for (String row : data.split("\\n")) {
+                String[] p = row.split("\\t", -1);
+                if (p.length >= 4 && p[0].matches("\\d{4}-\\d{2}-\\d{2}")) dates.add(p[0]);
             }
-            Toast.makeText(this, "تم إنشاء ملفات Excel (" + total + " سجل). افتح Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
+        }
+        return dates;
+    }
+
+    private void exportFiles() {
+        try {
+            String[] labels = {"العمقي", "بن دول"};
+            String[] keys = {"rows_العمقي", "rows_بن دول » محمد علوي احمد"};
+            int total = 0;
+            int files = 0;
+            if (Build.VERSION.SDK_INT < 29) {
+                if (!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) throw new Exception("التخزين الخارجي غير متاح");
+                File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "حوالات أبو علوي");
+                if (!dir.exists() && !dir.mkdirs()) throw new Exception("تعذر إنشاء مجلد التنزيلات");
+                for (int i = 0; i < labels.length; i++) {
+                    for (String date : getStoredDates(keys[i])) {
+                        total += writeGroup(dir, labels[i], keys[i], date);
+                        files++;
+                    }
+                }
+            } else {
+                for (int i = 0; i < labels.length; i++) {
+                    for (String date : getStoredDates(keys[i])) {
+                        total += writeGroupToDownloads(labels[i], keys[i], date);
+                        files++;
+                    }
+                }
+            }
+            if (files == 0) throw new Exception("لا توجد سجلات صالحة للتصدير");
+            Toast.makeText(this, "تم تحديث ملفات الحوالات حسب تواريخها (" + files + " ملف، " + total + " سجل). افتح Download/حوالات أبو علوي", Toast.LENGTH_LONG).show();
         } catch (Exception ex) {
             String reason = ex.getMessage();
             if (reason == null || reason.trim().isEmpty()) reason = ex.getClass().getSimpleName();
