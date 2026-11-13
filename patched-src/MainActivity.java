@@ -173,7 +173,7 @@ public class MainActivity extends Activity {
                 if (archivedOldRow) {
                     removed++;
                 } else {
-                    if (kept.length() > 0) kept.append("\\n");
+                    if (kept.length() > 0) kept.append("\n");
                     kept.append(row);
                 }
             }
