@@ -1,9 +1,8 @@
-name: Build Android APK
+name: Build signed Android APK (permanent key required)
 
 on:
+  # Manual release only: requires the permanent signing secrets to be configured.
   workflow_dispatch:
-  push:
-    branches: [ "main", "master" ]
 
 permissions:
   contents: read
