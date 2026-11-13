@@ -68,9 +68,15 @@ public class MainActivity extends Activity {
         refresh.setText("تحديث حالة الاستقبال والسجل");
         layout.addView(refresh);
         refresh.setOnClickListener(v -> {
+            int removed = removePreviouslyExportedDays();
             updateStatus();
             showEntries();
-            Toast.makeText(this, "تم تحديث حالة الخدمة وآخر إشعار", Toast.LENGTH_SHORT).show();
+            if (removed > 0) {
+                Toast.makeText(this, "تم التحديث وحذف " + removed
+                        + " سجل من الأيام السابقة بعد التأكد من وجود ملفات Excel سليمة. سجلات اليوم باقية.", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "تم التحديث. لا توجد سجلات قديمة مؤرشفة بملفات Excel سليمة لحذفها؛ صدّر الملفات أولاً إذا لزم الأمر.", Toast.LENGTH_LONG).show();
+            }
         });
 
         Button recordsAlAmqi = new Button(this);
@@ -118,6 +124,75 @@ public class MainActivity extends Activity {
         startBackgroundMonitor();
         updateStatus();
         showEntries();
+    }
+
+    // Delete only prior-day records whose corresponding Excel archive exists
+    // and passes XLSX structure + row-count validation. Today's records always stay.
+    // Remove prior-day rows only when the archived workbook matches every stored value.
+    // This protects the only remaining copy of any transfer if an export is incomplete.
+    private int removePreviouslyExportedDays() {
+        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
+        String[] keys = {"rows_العمقي", "rows_بن دول » محمد علوي احمد"};
+        String[] labels = {"العمقي", "بن دول"};
+        android.content.SharedPreferences prefs = getSharedPreferences("hawalat", MODE_PRIVATE);
+        android.content.SharedPreferences.Editor edit = prefs.edit();
+        int removed = 0;
+        File dir = new File(Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS), "أبو طلال");
+        for (int i = 0; i < keys.length; i++) {
+            String data = prefs.getString(keys[i], "");
+            if (TextUtils.isEmpty(data)) continue;
+            String[] allRows = data.split("\\n");
+            java.util.TreeMap<String, ArrayList<String[]>> expectedByDate = new java.util.TreeMap<>();
+            for (String row : allRows) {
+                String[] p = row.split("\\t", -1);
+                if (p.length >= 4 && p[0].matches("\\d{4}-\\d{2}-\\d{2}")
+                        && p[0].compareTo(today) < 0) {
+                    ArrayList<String[]> expected = expectedByDate.get(p[0]);
+                    if (expected == null) {
+                        expected = new ArrayList<>();
+                        expectedByDate.put(p[0], expected);
+                    }
+                    expected.add(new String[]{p[2], p[3], p[0], p[1]});
+                }
+            }
+            java.util.HashSet<String> safeToDelete = new java.util.HashSet<>();
+            for (java.util.Map.Entry<String, ArrayList<String[]>> entry : expectedByDate.entrySet()) {
+                File archived = new File(dir, labels[i] + "-" + entry.getKey() + ".xlsx");
+                try {
+                    if (archived.isFile() && archived.length() > 0) {
+                        validateXlsx(archived, entry.getValue());
+                        safeToDelete.add(entry.getKey());
+                    }
+                } catch (Exception invalidArchive) {
+                    android.util.Log.w("HawalatArchive", "Keep old rows; archive does not match stored data: "
+                            + archived.getName() + " - " + invalidArchive.getMessage());
+                }
+            }
+            if (safeToDelete.isEmpty()) continue;
+            StringBuilder kept = new StringBuilder();
+            for (String row : allRows) {
+                String[] p = row.split("\\t", -1);
+                boolean archivedOldRow = p.length >= 4
+                        && p[0].matches("\\d{4}-\\d{2}-\\d{2}")
+                        && safeToDelete.contains(p[0]);
+                if (archivedOldRow) {
+                    removed++;
+                } else {
+                    if (kept.length() > 0) kept.append("\\n");
+                    kept.append(row);
+                }
+            }
+            edit.putString(keys[i], kept.toString());
+        }
+        if (removed > 0) {
+            edit.putString("last_status", "حُذفت سجلات الأيام السابقة من الذاكرة بعد مطابقة كل بياناتها مع ملفات Excel؛ سجلات اليوم باقية");
+            if (!edit.commit()) {
+                android.util.Log.e("HawalatArchive", "Could not commit archived-row cleanup");
+                return 0;
+            }
+        }
+        return removed;
     }
 
     private void startBackgroundMonitor() {
@@ -314,7 +389,7 @@ public class MainActivity extends Activity {
                 out.flush();
                 out.getFD().sync();
             }
-            validateXlsx(validationFile, rows.size());
+            validateXlsx(validationFile, rows);
         } finally {
             if (validationFile.exists()) validationFile.delete();
         }
@@ -329,7 +404,7 @@ public class MainActivity extends Activity {
                 out.flush();
                 out.getFD().sync();
             }
-            validateXlsx(temp, rows.size());
+            validateXlsx(temp, rows);
             if (backup.exists() && !backup.delete()) {
                 throw new Exception("تعذر حذف النسخة الاحتياطية السابقة: " + backup.getName());
             }
@@ -344,7 +419,7 @@ public class MainActivity extends Activity {
             }
             // Keep the previous workbook until the final public Downloads copy
             // has passed the same XLSX and row-count validation as the temp file.
-            validateXlsx(target, rows.size());
+            validateXlsx(target, rows);
             if (backup.exists() && !backup.delete()) {
                 android.util.Log.w("HawalatExport", "Verified workbook saved; old backup retained at "
                         + backup.getAbsolutePath());
@@ -370,7 +445,10 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void validateXlsx(File file, int expectedDataRows) throws Exception {
+    private void validateXlsx(File file, ArrayList<String[]> expectedRows) throws Exception {
+        if (file == null || !file.isFile() || file.length() <= 0 || expectedRows == null) {
+            throw new Exception("ملف Excel غير موجود أو فارغ");
+        }
         java.util.HashSet<String> required = new java.util.HashSet<>();
         required.add("[Content_Types].xml");
         required.add("_rels/.rels");
@@ -378,9 +456,11 @@ public class MainActivity extends Activity {
         required.add("xl/_rels/workbook.xml.rels");
         required.add("xl/worksheets/sheet1.xml");
         required.add("xl/styles.xml");
-        int worksheetRows = -1;
         int workbookSheets = 0;
+        boolean worksheetRead = false;
         String spreadsheetNs = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        String[] actualHeaders = null;
+        ArrayList<String[]> actualRows = new ArrayList<>();
         try (java.util.zip.ZipInputStream zin = new java.util.zip.ZipInputStream(
                 new java.io.FileInputStream(file), StandardCharsets.UTF_8)) {
             java.util.zip.ZipEntry entry;
@@ -397,22 +477,90 @@ public class MainActivity extends Activity {
                     factory.setNamespaceAware(true);
                     try { factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true); }
                     catch (Exception ignored) {}
+                    try { factory.setFeature("http://xml.org/sax/features/external-general-entities", false); }
+                    catch (Exception ignored) {}
+                    try { factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false); }
+                    catch (Exception ignored) {}
+                    try { factory.setXIncludeAware(false); } catch (Exception ignored) {}
+                    factory.setExpandEntityReferences(false);
                     org.w3c.dom.Document document = factory.newDocumentBuilder().parse(
                             new java.io.ByteArrayInputStream(content.toByteArray()));
+                    org.w3c.dom.Element root = document.getDocumentElement();
                     if ("xl/workbook.xml".equals(name)) {
+                        if (root == null || !"workbook".equals(root.getLocalName())) {
+                            throw new Exception("بنية workbook.xml غير صحيحة");
+                        }
                         workbookSheets = document.getElementsByTagNameNS(spreadsheetNs, "sheet").getLength();
                     } else if ("xl/worksheets/sheet1.xml".equals(name)) {
-                        worksheetRows = document.getElementsByTagNameNS(spreadsheetNs, "row").getLength();
+                        if (root == null || !"worksheet".equals(root.getLocalName())) {
+                            throw new Exception("بنية ورقة Excel غير صحيحة");
+                        }
+                        org.w3c.dom.NodeList rowNodes = document.getElementsByTagNameNS(spreadsheetNs, "row");
+                        if (rowNodes.getLength() != expectedRows.size() + 1) {
+                            throw new Exception("عدد صفوف Excel لا يطابق المخزن؛ المتوقع "
+                                    + (expectedRows.size() + 1) + " والفعلي " + rowNodes.getLength());
+                        }
+                        if (rowNodes.getLength() == 0) throw new Exception("ورقة Excel بلا صفوف");
+                        actualHeaders = readXlsxRow((org.w3c.dom.Element) rowNodes.item(0));
+                        for (int i = 1; i < rowNodes.getLength(); i++) {
+                            actualRows.add(readXlsxRow((org.w3c.dom.Element) rowNodes.item(i)));
+                        }
+                        worksheetRead = true;
                     }
                 }
             }
         }
         if (!required.isEmpty()) throw new Exception("أجزاء XLSX الأساسية مفقودة: " + required);
-        if (workbookSheets < 1) throw new Exception("ملف Excel لا يحتوي ورقة عمل");
-        if (worksheetRows != expectedDataRows + 1) {
-            throw new Exception("عدد صفوف Excel غير مطابق؛ المتوقع "
-                    + (expectedDataRows + 1) + " والفعلي " + worksheetRows);
+        if (workbookSheets != 1) throw new Exception("ملف Excel يجب أن يحتوي ورقة عمل واحدة");
+        if (!worksheetRead || actualHeaders == null) throw new Exception("تعذر قراءة بيانات ورقة Excel");
+        String[] expectedHeaders = {"اسم المستلم", "المبلغ", "التاريخ", "الوقت"};
+        if (!java.util.Arrays.equals(actualHeaders, expectedHeaders)) {
+            throw new Exception("عناوين أعمدة Excel لا تطابق المطلوب");
         }
+        if (actualRows.size() != expectedRows.size()) {
+            throw new Exception("عدد سجلات Excel لا يطابق مخزن التطبيق");
+        }
+        for (int i = 0; i < expectedRows.size(); i++) {
+            if (!java.util.Arrays.equals(actualRows.get(i), expectedRows.get(i))) {
+                throw new Exception("بيانات Excel تختلف عن المخزن عند السجل رقم " + (i + 1));
+            }
+        }
+    }
+
+    private String[] readXlsxRow(org.w3c.dom.Element rowElement) throws Exception {
+        String spreadsheetNs = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        String[] values = new String[4];
+        boolean[] seen = new boolean[4];
+        org.w3c.dom.NodeList cells = rowElement.getElementsByTagNameNS(spreadsheetNs, "c");
+        for (int i = 0; i < cells.getLength(); i++) {
+            org.w3c.dom.Element cell = (org.w3c.dom.Element) cells.item(i);
+            String reference = cell.getAttribute("r");
+            if (reference == null || reference.length() < 2) {
+                throw new Exception("مرجع خلية Excel غير صالح");
+            }
+            int column = reference.charAt(0) - 'A';
+            if (column < 0 || column >= 4 || seen[column]) {
+                throw new Exception("أعمدة Excel مكررة أو خارج النطاق");
+            }
+            seen[column] = true;
+            String value = "";
+            if ("inlineStr".equals(cell.getAttribute("t"))) {
+                org.w3c.dom.NodeList textNodes = cell.getElementsByTagNameNS(spreadsheetNs, "t");
+                StringBuilder joined = new StringBuilder();
+                for (int t = 0; t < textNodes.getLength(); t++) {
+                    joined.append(textNodes.item(t).getTextContent());
+                }
+                value = joined.toString();
+            } else {
+                org.w3c.dom.NodeList valueNodes = cell.getElementsByTagNameNS(spreadsheetNs, "v");
+                if (valueNodes.getLength() > 0) value = valueNodes.item(0).getTextContent();
+            }
+            values[column] = value;
+        }
+        for (int column = 0; column < 4; column++) {
+            if (!seen[column]) throw new Exception("خلية مفقودة في عمود " + (column + 1));
+        }
+        return values;
     }
 
     private byte[] buildXlsxBytes(ArrayList<String[]> rows) throws Exception {
