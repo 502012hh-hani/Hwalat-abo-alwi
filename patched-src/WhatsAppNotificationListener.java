@@ -417,21 +417,30 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
     private String extractAmount(String text) {
         if (text == null) return "";
         String s = normalize(text).replace("٬", "").replace(",", "").trim();
-        // تجاهل أرقام الهاتف والحساب المسبوقة بتسميات الرقم/الحساب.
-        s = s.replaceAll("(?:رقم\\s*(?:الحساب|الهاتف|الجوال)|الرقم)\\s*[:：]?\\s*[0-9]{6,}", " ");
+        // Remove phone/account identifiers before looking for amounts.
+        s = s.replaceAll("(?:رقم\\s*(?:الحساب|الهاتف|الجوال)|الرقم|جوال المستلم)\\s*[:：]?\\s*[0-9]{6,}", " ");
         Matcher labeled = Pattern.compile("(?:المبلغ|مبلغ|القيمة)\\s*[:：]?\\s*([0-9]{2,7})").matcher(s);
         String labeledValue = "";
         while (labeled.find()) labeledValue = labeled.group(1);
         if (!labeledValue.isEmpty()) return labeledValue;
 
-        // الأولوية للرقم المرتبط بعملة؛ أرقام الحسابات الطويلة لا تُقبل كمبلغ.
         Matcher currency = Pattern.compile("([0-9]{2,7})\\s*(?:﷼|ريال(?:\\s+يمني)?|سعودي|يمني|ر\\.?س|ر\\.?ي)").matcher(s);
         String currencyValue = "";
         while (currency.find()) currencyValue = currency.group(1);
         if (!currencyValue.isEmpty()) return currencyValue;
 
-        // استخرج الرقم القصير من سطر مستقل حتى لو تبعه رمز عملة أو كلمة؛ لا نسجل العملة.
-        // لا نقبل أرقام الحسابات/الهاتف الطويلة أو الأرقام الملتصقة بكلمات مثل "الرقم".
+        // Common local format: recipient name immediately followed by amount and /place.
+        Matcher slashAmount = Pattern.compile("(?<![0-9])([0-9]{2,7})\\s*/\\s*[\\p{IsArabic}]+").matcher(s);
+        String slashValue = "";
+        while (slashAmount.find()) slashValue = slashAmount.group(1);
+        if (!slashValue.isEmpty()) return slashValue;
+
+        // Amounts sometimes touch the following place name without a separator.
+        Matcher attachedPlace = Pattern.compile("(?<![0-9])([0-9]{2,7})(?=(?:حضرموت|المكلا|عتق|القطن|شبوه|شبوة|عدن))").matcher(s);
+        String placeValue = "";
+        while (attachedPlace.find()) placeValue = attachedPlace.group(1);
+        if (!placeValue.isEmpty()) return placeValue;
+
         for (String line : s.split("[\\r\\n]+")) {
             String value = line.trim();
             Matcher standalone = Pattern.compile("^([0-9]{2,7})(?:\\s+.*)?$").matcher(value);
@@ -442,8 +451,9 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
     private String extractName(String text) {
         if (text == null) return "";
-        String s = normalize(text).replace("\\\\n", "\n");
-        Matcher labeled = Pattern.compile("(?:اسم\\s*المستلم|المستلم|مستلم|الاسم|الإسم|باسم)\\s*[:：/\\-]?\\s*([^\\n\\r]+)").matcher(s);
+        String s = normalize(text).replace("\\\\n", "\\n");
+        // Prefer explicit recipient labels and stop before sender/amount/location metadata.
+        Matcher labeled = Pattern.compile("(?:اسم\\s*المستلم|المستلم|مستلم|الاسم|الإسم|باسم|بااسم)\\s*[:：/\\-]?\\s*([^\\n\\r]+)").matcher(s);
         while (labeled.find()) {
             String candidate = cleanName(labeled.group(1));
             if (validName(candidate)) return candidate;
@@ -466,9 +476,14 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
     private String cleanName(String value) {
         if (value == null) return "";
-        String s = normalize(value).replace('\u200f', ' ').replace('\u200e', ' ')
-                .replace('\uFEFF', ' ').replaceAll("[0-9٠-٩۰-۹].*$", " ");
-        // احذف تعليمات التحويل وبيانات الحساب قبل تقييم الاسم.
+        String s = normalize(value).replace('\\u200f', ' ').replace('\\u200e', ' ')
+                .replace('\\uFEFF', ' ');
+        // Strip conversational lead-ins before a recipient name (e.g. "تسويها لنا باسم ...").
+        s = s.replaceAll("^(?:(?:تسويها|سويها|اعملها|اعمل|حولها|حوله|ارسلها|ارسليها)\\s+)?(?:لنا\\s+)?", "");
+        // A labeled recipient field ends before sender, amount, or transfer metadata.
+        s = s.replaceAll("(?i)\\s*(?:المرسل|اسم\\s*المرسل|المبلغ|مبلغ|القيمة|العملة|المنطقة|الموقع|العنوان|جوال\\s*المستلم|رقم\\s*(?:الحساب|الهاتف|الجوال)).*$", " ");
+        // Unlabeled formats put the amount directly after the recipient, sometimes without spaces.
+        s = s.replaceAll("[0-9٠-٩۰-۹].*$", " ");
         s = s.replaceAll("(?:رقم\\s*)?حساب(?:ي)?(?:\\s+العمقي|\\s+بن\\s*دول)?", " ")
              .replaceAll("(?i)ريال\\s*سعودي|ريال|سعودي|يمني|صافي|المبلغ|مبلغ|المرسل", " ")
              .replaceAll("حوالة|حواله|حوله|تحويل|ايداع|إيداع|إيداعه|في\\s+الحساب|بالحساب|الحساب|رقم", " ")
