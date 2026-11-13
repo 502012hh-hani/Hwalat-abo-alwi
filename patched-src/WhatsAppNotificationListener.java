@@ -451,7 +451,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
     private String extractName(String text) {
         if (text == null) return "";
-        String s = normalize(text).replace("\\\\n", "\\n");
+        String s = normalize(text).replace("\\\\n", "\n");
         // Prefer explicit recipient labels and stop before sender/amount/location metadata.
         Matcher labeled = Pattern.compile("(?:اسم\\s*المستلم|المستلم|مستلم|الاسم|الإسم|باسم|بااسم)\\s*[:：/\\-]?\\s*([^\\n\\r]+)").matcher(s);
         while (labeled.find()) {
@@ -476,7 +476,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
     private String cleanName(String value) {
         if (value == null) return "";
-        String s = normalize(value).replace('\\u200f', ' ').replace('\\u200e', ' ')
+        String s = normalize(value).replace('\u200f', ' ').replace('\u200e', ' ')
                 .replace('\\uFEFF', ' ');
         // Strip conversational lead-ins before a recipient name (e.g. "تسويها لنا باسم ...").
         s = s.replaceAll("^(?:(?:تسويها|سويها|اعملها|اعمل|حولها|حوله|ارسلها|ارسليها)\\s+)?(?:لنا\\s+)?", "");
