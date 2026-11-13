@@ -174,6 +174,57 @@ jobs:
           print("Permanent release signing configured; key material stays outside the repository")
           PY
 
+      - name: Enforce Android 10 legacy-storage target SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          path = Path("app/build.gradle")
+          source = path.read_text(encoding="utf-8")
+          start = source.find("defaultConfig")
+          if start < 0:
+              raise SystemExit("defaultConfig block not found in app/build.gradle")
+          opening = source.find("{", start)
+          if opening < 0:
+              raise SystemExit("defaultConfig opening brace not found")
+          depth = 0
+          closing = -1
+          for index in range(opening, len(source)):
+              if source[index] == "{":
+                  depth += 1
+              elif source[index] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      closing = index
+                      break
+          if closing < 0:
+              raise SystemExit("defaultConfig block is not balanced")
+          block = source[start:closing + 1]
+          target = re.search(r"(?m)^(\\s*)targetSdk(?:Version)?\\s*(?:=\\s*)?\\d+\\s*$", block)
+          if target:
+              block = re.sub(r"(?m)^(\\s*)targetSdk(?:Version)?\\s*(?:=\\s*)?\\d+\\s*$",
+                             r"\\1targetSdkVersion 28", block, count=1)
+          else:
+              min_sdk = re.search(r"(?m)^(\\s*)minSdk(?:Version)?\\s*(?:=\\s*)?\\d+\\s*$", block)
+              if min_sdk:
+                  indent = min_sdk.group(1)
+                  insertion = min_sdk.end()
+                  block = block[:insertion] + "\\n" + indent + "targetSdkVersion 28" + block[insertion:]
+              else:
+                  indent = "        "
+                  block = block[:-1] + indent + "targetSdkVersion 28\\n    }"
+          source = source[:start] + block + source[closing + 1:]
+          if not re.search(r"(?m)^\\s*targetSdkVersion\\s+28\\s*$", block):
+              raise SystemExit("Could not enforce targetSdkVersion 28")
+          path.write_text(source, encoding="utf-8")
+          print("Enforced targetSdkVersion 28 for Android 10 legacy Downloads access")
+          for line in block.splitlines():
+              if "minSdk" in line or "targetSdk" in line:
+                  print(line.strip())
+          PY
+
       - name: Apply Abu Talal app name and launcher icon
         shell: bash
         run: |
