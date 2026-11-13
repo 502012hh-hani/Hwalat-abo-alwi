@@ -27,7 +27,6 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
     @Override
     public void onListenerConnected() {
         super.onListenerConnected();
-        cleanStoredRows();
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("listener_state", "متصل بالنظام")
                 .putLong("listener_connected_at_ms", System.currentTimeMillis())
@@ -48,38 +47,9 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         super.onListenerDisconnected();
     }
 
-    // Remove malformed legacy rows created by earlier extraction versions.
-    private void cleanStoredRows() {
-        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        android.content.SharedPreferences.Editor edit = prefs.edit();
-        String[] keys = {"rows_العمقي", "rows_بن دول » محمد علوي احمد"};
-        boolean changed = false;
-        for (String key : keys) {
-            String old = prefs.getString(key, "");
-            StringBuilder kept = new StringBuilder();
-            java.util.HashSet<String> seenRows = new java.util.HashSet<>();
-            for (String row : old.split("\\n")) {
-                String[] fields = row.split("\\t", -1);
-                if (fields.length < 4) { changed = true; continue; }
-                String name = cleanName(fields[2]);
-                String amount = normalize(fields[3]).replaceAll("[^0-9]", "");
-                if (!validName(name) || !amount.matches("[0-9]{2,7}")) {
-                    changed = true;
-                    continue;
-                }
-                String cleaned = fields[0] + "\t" + fields[1] + "\t" + name + "\t" + amount;
-                // Exact same timestamp + recipient + amount is a reposted notification,
-                // not a second transfer. Keep legitimate repeated transfers at different times.
-                if (!seenRows.add(cleaned)) { changed = true; continue; }
-                if (kept.length() > 0) kept.append("\n");
-                kept.append(cleaned);
-                if (!name.equals(fields[2]) || !amount.equals(fields[3])) changed = true;
-            }
-            if (changed) edit.putString(key, kept.toString());
-        }
-        if (changed) edit.putString("last_status", "تم تنظيف السجلات القديمة من عبارات الحساب وأرقام الحسابات والأسماء غير الصالحة").apply();
-    }
-
+    // Intentionally do not rewrite stored rows on listener reconnect.
+    // Every valid transfer row is retained, including exact duplicate transfers.
+    
     private void captureActiveNotificationSnapshot() {
         try {
             StatusBarNotification[] active = getActiveNotifications();
@@ -136,12 +106,51 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         handleNotificationPosted(sbn, true);
     }
 
+    // Build a stable content fingerprint instead of relying on Bundle.toString(),
+    // whose representation is not a reliable signal for nested MessagingStyle updates.
+    private String buildActiveNotificationSignature(StatusBarNotification sbn) {
+        StringBuilder value = new StringBuilder();
+        value.append(sbn.getPackageName()).append('|').append(sbn.getPostTime())
+                .append('|').append(sbn.getKey());
+        Notification notification = sbn.getNotification();
+        Bundle extras = notification == null ? null : notification.extras;
+        if (extras == null) return value.toString();
+        value.append('|').append(str(extras.getCharSequence(Notification.EXTRA_TITLE)))
+                .append('|').append(str(extras.getCharSequence(Notification.EXTRA_SUB_TEXT)))
+                .append('|').append(str(extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)))
+                .append('|').append(str(extras.getCharSequence(Notification.EXTRA_TEXT)))
+                .append('|').append(str(extras.getCharSequence(Notification.EXTRA_BIG_TEXT)));
+        CharSequence[] lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+        if (lines != null) {
+            for (CharSequence line : lines) value.append("|line:").append(str(line));
+        }
+        Parcelable[] messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES);
+        if (messages != null) {
+            for (Parcelable item : messages) {
+                if (!(item instanceof Bundle)) continue;
+                Bundle message = (Bundle) item;
+                value.append("|msg:")
+                        .append(str(message.getCharSequence("text")))
+                        .append("|sender:")
+                        .append(str(message.getCharSequence("sender")))
+                        .append("|time:")
+                        .append(message.getLong("time", 0L));
+                if (Build.VERSION.SDK_INT >= 28) {
+                    try {
+                        Person person = message.getParcelable("sender_person");
+                        if (person != null) value.append("|person:").append(str(person.getName()));
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
+        return value.toString();
+    }
+
     private void processIfActiveNotificationChanged(StatusBarNotification sbn) {
         if (sbn == null) return;
         try {
             Bundle extras = sbn.getNotification() == null ? null : sbn.getNotification().extras;
-            String signature = String.valueOf(sbn.getPostTime()) + "|" +
-                    (extras == null ? "" : extras.toString());
+            String signature = buildActiveNotificationSignature(sbn);
             String key = "active_seen_" + Integer.toHexString(sbn.getKey().hashCode());
             android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
             String previous = prefs.getString(key, null);

@@ -68,9 +68,15 @@ public class MainActivity extends Activity {
         refresh.setText("تحديث حالة الاستقبال والسجل");
         layout.addView(refresh);
         refresh.setOnClickListener(v -> {
+            int removed = removePreviouslyExportedDays();
             updateStatus();
             showEntries();
-            Toast.makeText(this, "تم تحديث حالة الخدمة وآخر إشعار", Toast.LENGTH_SHORT).show();
+            if (removed > 0) {
+                Toast.makeText(this, "تم التحديث وحذف " + removed
+                        + " سجل من الأيام السابقة بعد التأكد من وجود ملفات Excel سليمة. سجلات اليوم باقية.", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "تم التحديث. لا توجد سجلات قديمة مؤرشفة بملفات Excel سليمة لحذفها؛ صدّر الملفات أولاً إذا لزم الأمر.", Toast.LENGTH_LONG).show();
+            }
         });
 
         Button recordsAlAmqi = new Button(this);
@@ -118,6 +124,69 @@ public class MainActivity extends Activity {
         startBackgroundMonitor();
         updateStatus();
         showEntries();
+    }
+
+    // Delete only prior-day records whose corresponding Excel archive exists
+    // and passes XLSX structure + row-count validation. Today's records always stay.
+    private int removePreviouslyExportedDays() {
+        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
+        String[] keys = {"rows_العمقي", "rows_بن دول » محمد علوي احمد"};
+        String[] labels = {"العمقي", "بن دول"};
+        android.content.SharedPreferences prefs = getSharedPreferences("hawalat", MODE_PRIVATE);
+        android.content.SharedPreferences.Editor edit = prefs.edit();
+        int removed = 0;
+        File dir = new File(Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS), "أبو طلال");
+        for (int i = 0; i < keys.length; i++) {
+            String data = prefs.getString(keys[i], "");
+            if (TextUtils.isEmpty(data)) continue;
+            String[] allRows = data.split("\\n");
+            java.util.HashMap<String, Integer> oldDateCounts = new java.util.HashMap<>();
+            for (String row : allRows) {
+                String[] p = row.split("\\t", -1);
+                if (p.length >= 4 && p[0].matches("\\d{4}-\\d{2}-\\d{2}")
+                        && p[0].compareTo(today) < 0) {
+                    Integer count = oldDateCounts.get(p[0]);
+                    oldDateCounts.put(p[0], count == null ? 1 : count + 1);
+                }
+            }
+            java.util.HashSet<String> safeToDelete = new java.util.HashSet<>();
+            for (java.util.Map.Entry<String, Integer> entry : oldDateCounts.entrySet()) {
+                File archived = new File(dir, labels[i] + "-" + entry.getKey() + ".xlsx");
+                try {
+                    if (archived.isFile() && archived.length() > 0) {
+                        validateXlsx(archived, entry.getValue());
+                        safeToDelete.add(entry.getKey());
+                    }
+                } catch (Exception invalidArchive) {
+                    android.util.Log.w("HawalatArchive", "Keep old rows; archive not verified: "
+                            + archived.getName() + " - " + invalidArchive.getMessage());
+                }
+            }
+            if (safeToDelete.isEmpty()) continue;
+            StringBuilder kept = new StringBuilder();
+            for (String row : allRows) {
+                String[] p = row.split("\\t", -1);
+                boolean archivedOldRow = p.length >= 4
+                        && p[0].matches("\\d{4}-\\d{2}-\\d{2}")
+                        && safeToDelete.contains(p[0]);
+                if (archivedOldRow) {
+                    removed++;
+                } else {
+                    if (kept.length() > 0) kept.append("\n");
+                    kept.append(row);
+                }
+            }
+            edit.putString(keys[i], kept.toString());
+        }
+        if (removed > 0) {
+            edit.putString("last_status", "تم حذف سجلات الأيام السابقة من ذاكرة التطبيق بعد التحقق من أرشفتها في ملفات Excel؛ سجلات اليوم محفوظة");
+            if (!edit.commit()) {
+                android.util.Log.e("HawalatArchive", "Could not commit archived-row cleanup");
+                return 0;
+            }
+        }
+        return removed;
     }
 
     private void startBackgroundMonitor() {

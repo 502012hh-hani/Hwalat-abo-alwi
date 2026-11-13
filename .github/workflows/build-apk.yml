@@ -1,8 +1,10 @@
-name: Build Android APK
+name: Build Android APK - Notification Recovery Validation
 
 on:
   workflow_dispatch:
   push:
+    branches: [ "main", "master", "notification-recovery-validation" ]
+  pull_request:
     branches: [ "main", "master" ]
 
 permissions:
@@ -16,9 +18,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
     timeout-minutes: 30
 
     steps:
@@ -124,57 +123,6 @@ jobs:
           print("Android 10 storage permission declaration verified")
           PY
 
-      - name: Configure permanent release signing
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          missing=0
-          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "::error::Missing repository Actions secret: $name"
-              missing=1
-            fi
-          done
-          if [[ "$missing" -ne 0 ]]; then
-            exit 1
-          fi
-          KEYSTORE="$RUNNER_TEMP/hawalat-release.p12"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
-          test -s "$KEYSTORE"
-          keytool -list -keystore "$KEYSTORE" -storetype PKCS12 \
-            -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
-          echo "ANDROID_KEYSTORE_FILE=$KEYSTORE" >> "$GITHUB_ENV"
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("app/build.gradle")
-          source = path.read_text(encoding="utf-8")
-          if "signingConfigs" in source or "buildTypes" in source:
-              raise SystemExit("Unexpected existing signing/buildTypes block; refusing unsafe rewrite")
-          marker = "android {"
-          if marker not in source:
-              raise SystemExit("Android Gradle block not found")
-          signing = """android {
-              signingConfigs {
-                  release {
-                      storeFile file(System.getenv("ANDROID_KEYSTORE_FILE"))
-                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
-                      keyPassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                  }
-              }
-              buildTypes {
-                  release {
-                      signingConfig signingConfigs.release
-                      minifyEnabled false
-                  }
-              }
-          """
-          path.write_text(source.replace(marker, signing, 1), encoding="utf-8")
-          print("Permanent release signing configured; key material stays outside the repository")
-          PY
-
       - name: Apply Abu Talal app name and launcher icon
         shell: bash
         run: |
@@ -224,14 +172,14 @@ jobs:
           print("App label and Arabic launcher icon set to أبو طلال")
           PY
 
-      - name: Build signed release APK
-        run: gradle --no-daemon :app:assembleRelease
+      - name: Build debug APK for notification recovery validation
+        run: gradle --no-daemon :app:assembleDebug
 
-      - name: Verify APK and permanent signing identity
+      - name: Verify APK package and debug signature
         shell: bash
         run: |
           set -euo pipefail
-          APK=app/build/outputs/apk/release/app-release.apk
+          APK=app/build/outputs/apk/debug/app-debug.apk
           test -s "$APK"
           test "$(stat -c%s "$APK")" -gt 10000
           unzip -t "$APK"
@@ -239,20 +187,12 @@ jobs:
           test -n "$SDK"
           APKSIGNER="$(find "$SDK/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
-          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apk-signature.txt"
-          EXPECTED="$(keytool -list -v -keystore "$ANDROID_KEYSTORE_FILE" -storetype PKCS12 -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | awk -F': ' '/SHA256:/{print $2; exit}' | tr -d ':' | tr 'A-F' 'a-f')"
-          ACTUAL="$(awk '/Signer #1 certificate SHA-256 digest:/{print $NF; exit}' "$RUNNER_TEMP/apk-signature.txt" | tr -d ':' | tr 'A-F' 'a-f')"
-          test -n "$EXPECTED" && test -n "$ACTUAL"
-          if [[ "$EXPECTED" != "$ACTUAL" ]]; then
-            echo "::error::APK signer fingerprint does not match the permanent keystore"
-            exit 1
-          fi
-          echo "APK signature matches the permanent release key"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          echo "APK exists, is a valid ZIP, and has a verifiable Android signature"
 
-
-      - name: Save APK
+      - name: Save validation APK
         uses: actions/upload-artifact@v4
         with:
-          name: Hawalat-Abu-Alawi
-          path: app/build/outputs/apk/release/app-release.apk
+          name: Hawalat-Abu-Alawi-notification-validation
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
