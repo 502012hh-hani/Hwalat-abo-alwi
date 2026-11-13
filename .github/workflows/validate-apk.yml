@@ -149,21 +149,22 @@ jobs:
           if closing < 0:
               raise SystemExit("defaultConfig block is not balanced")
           block = source[start:closing + 1]
-          target = re.search(r"(?m)^(\\s*)targetSdk(?:Version)?\\s*(?:=\\s*)?\\d+\\s*$", block)
+          target_pattern = r"(?m)^(\s*)targetSdk(?:Version)?\s*(?:=\s*)?\d+\s*(?://.*)?$"
+          target = re.search(target_pattern, block)
           if target:
-              block = re.sub(r"(?m)^(\\s*)targetSdk(?:Version)?\\s*(?:=\\s*)?\\d+\\s*$",
-                             r"\\1targetSdkVersion 28", block, count=1)
+              block = re.sub(target_pattern, r"\1targetSdkVersion 28", block, count=1)
           else:
-              min_sdk = re.search(r"(?m)^(\\s*)minSdk(?:Version)?\\s*(?:=\\s*)?\\d+\\s*$", block)
+              min_pattern = r"(?m)^(\s*)minSdk(?:Version)?\s*(?:=\s*)?\d+\s*(?://.*)?$"
+              min_sdk = re.search(min_pattern, block)
               if min_sdk:
                   indent = min_sdk.group(1)
                   insertion = min_sdk.end()
-                  block = block[:insertion] + "\\n" + indent + "targetSdkVersion 28" + block[insertion:]
+                  block = block[:insertion] + "\n" + indent + "targetSdkVersion 28" + block[insertion:]
               else:
                   indent = "        "
-                  block = block[:-1] + indent + "targetSdkVersion 28\\n    }"
+                  block = block[:-1] + indent + "targetSdkVersion 28\n    }"
           source = source[:start] + block + source[closing + 1:]
-          if not re.search(r"(?m)^\\s*targetSdkVersion\\s+28\\s*$", block):
+          if not re.search(r"(?m)^\s*targetSdkVersion\s+28\s*$", block):
               raise SystemExit("Could not enforce targetSdkVersion 28")
           path.write_text(source, encoding="utf-8")
           print("Enforced targetSdkVersion 28 for Android 10 legacy Downloads access")
