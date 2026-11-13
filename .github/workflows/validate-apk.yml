@@ -248,6 +248,17 @@ jobs:
           sha256sum "$APK"
           echo "APK ZIP, package id, minSdk 23, targetSdk 28, and debug signature verified."
           echo "This is a validation APK, not the permanent-key release APK."
+      - name: Record validation build provenance
+        shell: bash
+        run: |
+          {
+            echo "Source commit: $GITHUB_SHA"
+            echo "APK variant: debug validation only"
+            echo "Package: com.abualawi.hawalat"
+            echo "minSdk: 23"
+            echo "targetSdk: 28"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Save validation APK
         uses: actions/upload-artifact@v4
         with:
