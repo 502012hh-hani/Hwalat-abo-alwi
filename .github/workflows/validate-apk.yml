@@ -1,0 +1,205 @@
+name: Build Android APK - Validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+permissions:
+  contents: read
+
+# Keep the newest APK build from waiting behind a stale run.
+concurrency:
+  group: android-apk-validation
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Get source code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Restore Android project from source archive
+        shell: bash
+        run: |
+          unzip -oq HawalatAbuAlawi-source.zip -d "$RUNNER_TEMP/hawalat-source"
+          test -f "$RUNNER_TEMP/hawalat-source/build.gradle"
+          test -f "$RUNNER_TEMP/hawalat-source/settings.gradle"
+          test -f "$RUNNER_TEMP/hawalat-source/gradle.properties"
+          test -f "$RUNNER_TEMP/hawalat-source/app/build.gradle"
+          test -f "$RUNNER_TEMP/hawalat-source/app/src/main/AndroidManifest.xml"
+          cp "$RUNNER_TEMP/hawalat-source/build.gradle" ./build.gradle
+          cp "$RUNNER_TEMP/hawalat-source/settings.gradle" ./settings.gradle
+          cp "$RUNNER_TEMP/hawalat-source/gradle.properties" ./gradle.properties
+          rm -rf app
+          cp -a "$RUNNER_TEMP/hawalat-source/app" ./app
+          mkdir -p app/src/main/java/com/abualawi/hawalat
+          cp patched-src/MainActivity.java app/src/main/java/com/abualawi/hawalat/MainActivity.java
+          cp patched-src/WhatsAppNotificationListener.java app/src/main/java/com/abualawi/hawalat/WhatsAppNotificationListener.java
+          cp patched-src/KeepAliveService.java app/src/main/java/com/abualawi/hawalat/KeepAliveService.java
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          p = Path("app/src/main/AndroidManifest.xml")
+          android = "{http://schemas.android.com/apk/res/android}"
+          ET.register_namespace("android", "http://schemas.android.com/apk/res/android")
+          tree = ET.parse(p)
+          root = tree.getroot()
+          app = root.find("application")
+          if app is None:
+              raise SystemExit("Manifest application element is missing")
+          # Android 10 / targetSdk 28: keep legacy public Downloads access for the app.
+          app.set(android + "requestLegacyExternalStorage", "true")
+          service = None
+          for item in app.findall("service"):
+              name = item.get(android + "name", "")
+              if name in (".WhatsAppNotificationListener", "com.abualawi.hawalat.WhatsAppNotificationListener"):
+                  service = item
+                  break
+          if service is None:
+              service = ET.SubElement(app, "service")
+              service.set(android + "name", ".WhatsAppNotificationListener")
+          service.set(android + "permission", "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE")
+          service.set(android + "exported", "true")
+          has_action = False
+          for filt in service.findall("intent-filter"):
+              for action in filt.findall("action"):
+                  if action.get(android + "name") == "android.service.notification.NotificationListenerService":
+                      has_action = True
+          if not has_action:
+              filt = ET.SubElement(service, "intent-filter")
+              ET.SubElement(filt, "action").set(android + "name", "android.service.notification.NotificationListenerService")
+          keepalive = None
+          for item in app.findall("service"):
+              if item.get(android + "name", "") in (".KeepAliveService", "com.abualawi.hawalat.KeepAliveService"):
+                  keepalive = item
+                  break
+          if keepalive is None:
+              keepalive = ET.SubElement(app, "service")
+              keepalive.set(android + "name", ".KeepAliveService")
+          keepalive.set(android + "exported", "false")
+          tree.write(p, encoding="utf-8", xml_declaration=True)
+          print("Notification listener and foreground keep-alive services verified")
+          PY
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          android = "{http://schemas.android.com/apk/res/android}"
+          p = Path("app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          permissions = [
+              '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />',
+              '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />'
+          ]
+          end = s.find(">", s.find("<manifest"))
+          if end < 0:
+              raise SystemExit("Manifest opening tag not found")
+          for permission in permissions:
+              if permission not in s:
+                  s = s[:end + 1] + "\n    " + permission + s[end + 1:]
+                  end = s.find(">", s.find("<manifest"))
+          p.write_text(s)
+          # Fail the build if Android 10 storage permission is missing or capped below API 29.
+          check = ET.parse(p).getroot()
+          storage = [x for x in check.findall("uses-permission") if x.get(android + "name") == "android.permission.WRITE_EXTERNAL_STORAGE"]
+          if not storage or storage[0].get(android + "maxSdkVersion") != "29":
+              raise SystemExit("WRITE_EXTERNAL_STORAGE must be declared through Android 10 (API 29)")
+          print("Android 10 storage permission declaration verified")
+          PY
+
+      - name: Apply Abu Talal app name and launcher icon
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-core
+          python3 -m pip install --user pillow
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          from PIL import Image, ImageDraw, ImageFont
+          root = Path("app/src/main")
+          manifest = root / "AndroidManifest.xml"
+          android = "{http://schemas.android.com/apk/res/android}"
+          ET.register_namespace("android", "http://schemas.android.com/apk/res/android")
+          tree = ET.parse(manifest)
+          app = tree.getroot().find("application")
+          if app is None:
+              raise SystemExit("Manifest application element is missing")
+          app.set(android + "label", "أبو طلال")
+          app.set(android + "icon", "@mipmap/ic_launcher")
+          tree.write(manifest, encoding="utf-8", xml_declaration=True)
+          font_path = subprocess.check_output(
+              ["fc-match", "Noto Sans Arabic:style=Bold", "-f", "%{file}"],
+              text=True
+          ).strip()
+          if not font_path or not Path(font_path).is_file():
+              raise SystemExit("Arabic font for launcher icon was not found")
+          for density, size in [("mdpi",48),("hdpi",72),("xhdpi",96),("xxhdpi",144),("xxxhdpi",192)]:
+              image = Image.new("RGB", (size, size), (12, 28, 48))
+              draw = ImageDraw.Draw(image)
+              scale = size / 192
+              margin = max(2, int(7 * scale))
+              draw.rounded_rectangle((margin, margin, size-margin, size-margin),
+                                     radius=int(34*scale), fill=(12,28,48),
+                                     outline=(226,184,92), width=max(1,int(4*scale)))
+              draw.ellipse((int(22*scale),int(22*scale),int(170*scale),int(170*scale)),
+                           outline=(226,184,92), width=max(1,int(2*scale)))
+              font = ImageFont.truetype(font_path, max(8,int(31*scale)))
+              draw.text((size/2,size/2), "أبو طلال", font=font, fill=(255,245,220),
+                        anchor="mm", direction="rtl", language="ar",
+                        stroke_width=max(0,int(scale)), stroke_fill=(12,28,48))
+              out = root / "res" / ("mipmap-" + density) / "ic_launcher.png"
+              out.parent.mkdir(parents=True, exist_ok=True)
+              image.save(out, format="PNG", optimize=True)
+          print("App label and Arabic launcher icon set to أبو طلال")
+          PY
+
+      - name: Build debug APK for validation only
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify APK package, Android compatibility, and debug signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          test "$(stat -c%s "$APK")" -gt 10000
+          unzip -t "$APK"
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK"
+          BUILD_TOOLS="$(find "$SDK/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          AAPT="$BUILD_TOOLS/aapt"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apk-signature.txt"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          grep -F "package: name='com.abualawi.hawalat'" <<< "$BADGING"
+          grep -F "sdkVersion:'23'" <<< "$BADGING"
+          grep -F "targetSdkVersion:'28'" <<< "$BADGING"
+          sha256sum "$APK"
+          echo "APK ZIP, package id, minSdk 23, targetSdk 28, and debug signature verified."
+          echo "This is a validation APK, not the permanent-key release APK."
+      - name: Save validation APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hawalat-Abu-Alawi-validation
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+          if-no-files-found: error
