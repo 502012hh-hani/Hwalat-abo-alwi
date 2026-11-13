@@ -429,6 +429,10 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         while (currency.find()) currencyValue = currency.group(1);
         if (!currencyValue.isEmpty()) return currencyValue;
 
+        // Some messages start with an amount followed by a dot, then the recipient name.
+        Matcher leadingAmount = Pattern.compile("(?m)^\\s*([0-9]{2,7})\\s*[.)،:-]\\s*(?=[\\p{IsArabic}])").matcher(s);
+        if (leadingAmount.find()) return leadingAmount.group(1);
+
         // Common local format: recipient name immediately followed by amount and /place.
         Matcher slashAmount = Pattern.compile("(?<![0-9])([0-9]{2,7})\\s*/\\s*[\\p{IsArabic}]+").matcher(s);
         String slashValue = "";
@@ -482,6 +486,8 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         s = s.replaceAll("^(?:(?:تسويها|سويها|اعملها|اعمل|حولها|حوله|ارسلها|ارسليها)\\s+)?(?:لنا\\s+)?", "");
         // A labeled recipient field ends before sender, amount, or transfer metadata.
         s = s.replaceAll("(?i)\\s*(?:المرسل|اسم\\s*المرسل|المبلغ|مبلغ|القيمة|العملة|المنطقة|الموقع|العنوان|جوال\\s*المستلم|رقم\\s*(?:الحساب|الهاتف|الجوال)).*$", " ");
+        // Remove a leading amount prefix such as "200. " before the recipient name.
+        s = s.replaceAll("^\\s*[0-9]{2,7}\\s*[.)،:-]\\s*", "");
         // Unlabeled formats put the amount directly after the recipient, sometimes without spaces.
         s = s.replaceAll("[0-9٠-٩۰-۹].*$", " ");
         s = s.replaceAll("(?:رقم\\s*)?حساب(?:ي)?(?:\\s+العمقي|\\s+بن\\s*دول)?", " ")
