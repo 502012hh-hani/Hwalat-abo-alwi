@@ -27,7 +27,6 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
     @Override
     public void onListenerConnected() {
         super.onListenerConnected();
-        cleanStoredRows();
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("listener_state", "متصل بالنظام")
                 .putLong("listener_connected_at_ms", System.currentTimeMillis())
@@ -48,38 +47,9 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         super.onListenerDisconnected();
     }
 
-    // Remove malformed legacy rows created by earlier extraction versions.
-    private void cleanStoredRows() {
-        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        android.content.SharedPreferences.Editor edit = prefs.edit();
-        String[] keys = {"rows_العمقي", "rows_بن دول » محمد علوي احمد"};
-        boolean changed = false;
-        for (String key : keys) {
-            String old = prefs.getString(key, "");
-            StringBuilder kept = new StringBuilder();
-            java.util.HashSet<String> seenRows = new java.util.HashSet<>();
-            for (String row : old.split("\\n")) {
-                String[] fields = row.split("\\t", -1);
-                if (fields.length < 4) { changed = true; continue; }
-                String name = cleanName(fields[2]);
-                String amount = normalize(fields[3]).replaceAll("[^0-9]", "");
-                if (!validName(name) || !amount.matches("[0-9]{2,7}")) {
-                    changed = true;
-                    continue;
-                }
-                String cleaned = fields[0] + "\t" + fields[1] + "\t" + name + "\t" + amount;
-                // Exact same timestamp + recipient + amount is a reposted notification,
-                // not a second transfer. Keep legitimate repeated transfers at different times.
-                if (!seenRows.add(cleaned)) { changed = true; continue; }
-                if (kept.length() > 0) kept.append("\n");
-                kept.append(cleaned);
-                if (!name.equals(fields[2]) || !amount.equals(fields[3])) changed = true;
-            }
-            if (changed) edit.putString(key, kept.toString());
-        }
-        if (changed) edit.putString("last_status", "تم تنظيف السجلات القديمة من عبارات الحساب وأرقام الحسابات والأسماء غير الصالحة").apply();
-    }
-
+    // Intentionally do not rewrite stored rows on listener reconnect.
+    // Every valid transfer row is retained, including exact duplicate transfers.
+    
     private void captureActiveNotificationSnapshot() {
         try {
             StatusBarNotification[] active = getActiveNotifications();
