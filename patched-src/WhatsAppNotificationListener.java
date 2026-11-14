@@ -445,6 +445,12 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         while (attachedPlace.find()) placeValue = attachedPlace.group(1);
         if (!placeValue.isEmpty()) return placeValue;
 
+        // Some transfer messages attach a short amount directly to a place or
+        // descriptor (for example: "1000بيعث العمقي"). Account/phone numbers
+        // are normally 8+ digits and are deliberately excluded by this bound.
+        Matcher attachedArabic = Pattern.compile("(?m)^\\s*([0-9]{2,7})(?=[\\p{IsArabic}])").matcher(s);
+        if (attachedArabic.find()) return attachedArabic.group(1);
+
         for (String line : s.split("[\\r\\n]+")) {
             String value = line.trim();
             Matcher standalone = Pattern.compile("^([0-9]{2,7})(?:\\s+.*)?$").matcher(value);
@@ -484,6 +490,10 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                 .replace(String.valueOf((char) 0xFEFF), " ");
         // Strip conversational lead-ins before a recipient name (e.g. "تسويها لنا باسم ...").
         s = s.replaceAll("^(?:(?:تسويها|سويها|اعملها|اعمل|حولها|حوله|ارسلها|ارسليها)\\s+)?(?:لنا\\s+)?", "");
+        // A bank/account identifier may be concatenated immediately before the
+        // recipient name: "254093946عامر حيدر عمر الصقير". Remove only a
+        // 6+ digit prefix at the start of a line, never digits inside a name.
+        s = s.replaceAll("(?m)^\\s*[0-9]{6,}\\s*(?=[\\p{IsArabic}])", "");
         // A labeled recipient field ends before sender, amount, or transfer metadata.
         s = s.replaceAll("(?i)\\s*(?:المرسل|اسم\\s*المرسل|المبلغ|مبلغ|القيمة|العملة|المنطقة|الموقع|العنوان|جوال\\s*المستلم|رقم\\s*(?:الحساب|الهاتف|الجوال)).*$", " ");
         // Remove a leading amount prefix such as "200. " before the recipient name.
