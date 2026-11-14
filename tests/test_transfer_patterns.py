@@ -73,3 +73,15 @@ for i, (raw, expected_name, expected_amount) in enumerate(cases, 1):
     assert amount == expected_amount, f"case {i}: amount={amount!r}, expected={expected_amount!r}"
     print(f"PASS {i}: {name} | {amount}")
 print("PASS: all 7 Al-Amqi regression fixtures")
+
+# Guard against corrupting the remaining SharedPreferences rows during archive cleanup.
+# Java must append an actual newline character, not the two literal characters \\ and n.
+from pathlib import Path
+main_source = Path("patched-src/MainActivity.java").read_text(encoding="utf-8")
+assert 'if (kept.length() > 0) kept.append("\\n");' in main_source, (
+    "Archived-row cleanup must join retained transfer rows with a real newline"
+)
+assert 'if (kept.length() > 0) kept.append("\\\\n");' not in main_source, (
+    "Archived-row cleanup must not write a literal backslash-n into stored data"
+)
+print("PASS: archived-row cleanup preserves valid newline-separated records")
