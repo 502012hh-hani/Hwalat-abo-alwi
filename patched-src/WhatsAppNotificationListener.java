@@ -481,7 +481,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
     private String cleanName(String value) {
         if (value == null) return "";
         String s = normalize(value).replace('\u200f', ' ').replace('\u200e', ' ')
-                .replace('\\uFEFF', ' ');
+                .replace(String.valueOf((char) 0xFEFF), " ");
         // Strip conversational lead-ins before a recipient name (e.g. "تسويها لنا باسم ...").
         s = s.replaceAll("^(?:(?:تسويها|سويها|اعملها|اعمل|حولها|حوله|ارسلها|ارسليها)\\s+)?(?:لنا\\s+)?", "");
         // A labeled recipient field ends before sender, amount, or transfer metadata.
