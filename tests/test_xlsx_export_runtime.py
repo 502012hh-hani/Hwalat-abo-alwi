@@ -95,14 +95,15 @@ __METHODS__
         rows.add(new String[]{"علي & <خالد>", "500", "2026-11-15", "12:02:00"});
         rows.add(new String[]{"علي & <خالد>", "٥٠٠", "2026-11-15", "12:01:00"});
         rows.add(new String[]{"سالم", "200", "2026-11-15", "11:59:00"});
-        byte[] bytes = buildXlsxBytes(rows);
+        XlsxRuntimeProbe probe = new XlsxRuntimeProbe();
+        byte[] bytes = probe.buildXlsxBytes(rows);
         File output = new File(args[0]);
         try (FileOutputStream stream = new FileOutputStream(output)) {
             stream.write(bytes);
             stream.flush();
             stream.getFD().sync();
         }
-        validateXlsx(output, rows);
+        probe.validateXlsx(output, rows);
         System.out.println("PASS: production Java XLSX writer and validator round-trip " + rows.size() + " rows");
     }
 }
