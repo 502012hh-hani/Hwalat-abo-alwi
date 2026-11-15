@@ -73,7 +73,9 @@ assert "normalizeDuplicateAmount(row[1])" in xlsx
 assert "FFFFFF00" in xlsx
 
 # Both export and archive cleanup must use the same public Downloads subfolder.
-assert MAIN.count('new File(downloads, "أبو طلال")') >= 2
+assert 'new File(downloads, "أبو طلال")' in write
+assert 'Environment.getExternalStoragePublicDirectory(' in cleanup
+assert '"أبو طلال")' in cleanup
 
 # Android 10 compatibility is enforced by the validation build itself.
 assert 'requestLegacyExternalStorage", "true"' in BUILD
