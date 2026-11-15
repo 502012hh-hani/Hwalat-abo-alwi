@@ -25,6 +25,9 @@ jobs:
       - name: Test seven Al-Amqi regression messages
         run: python3 tests/test_transfer_patterns.py
 
+      - name: Test daily XLSX export and archive-safety contract
+        run: python3 tests/test_xlsx_export_contract.py
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
