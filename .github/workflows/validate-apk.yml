@@ -34,6 +34,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Run production XLSX writer round-trip on JVM
+        run: python3 tests/test_xlsx_export_runtime.py
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
