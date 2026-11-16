@@ -83,6 +83,13 @@ assert 'android.permission.WRITE_EXTERNAL_STORAGE' in BUILD
 assert 'android:maxSdkVersion="29"' in BUILD
 assert "targetSdkVersion 28" in BUILD
 
+# Notification appends and archive cleanup share one process lock.
+# Without this, cleanup could commit an older SharedPreferences snapshot after
+# a new notification was appended, silently dropping that newly received transfer.
+assert "public static final Object TRANSFER_DATA_LOCK" in MAIN
+assert "synchronized (MainActivity.TRANSFER_DATA_LOCK)" in cleanup
+assert "synchronized (MainActivity.TRANSFER_DATA_LOCK)" in save
+
 # Notification writes remain append-only: duplicate rows are not discarded.
 assert 'row + (old.isEmpty() ? "" : "\\n" + old)' in save
 print("PASS: daily per-group/date XLSX snapshot contract")
