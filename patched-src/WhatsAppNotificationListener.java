@@ -386,6 +386,8 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
     }
 
     private void saveTransfer(String group, String name, String amount, long timeMillis) {
+synchronized (MainActivity.TRANSFER_DATA_LOCK) {
+
         String date = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(timeMillis));
         String time = new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date(timeMillis));
         String key = "rows_" + group;
@@ -400,6 +402,8 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                         + " (" + group + ")" + (containsSameTransfer(old, date, name, amount)
                         ? " — تكرار محفوظ وسيُميّز في Excel" : ""))
                 .apply();
+    
+}
     }
 
     private boolean containsSameTransfer(String old, String date, String name, String amount) {
