@@ -33,6 +33,8 @@ import java.util.Locale;
 import java.util.TreeSet;
 
 public class MainActivity extends Activity {
+    // Serialize notification appends with archive cleanup to prevent stale snapshot commits.
+    public static final Object TRANSFER_DATA_LOCK = new Object();
     private TextView status, entries;
 
     @Override public void onCreate(Bundle state) {
@@ -131,6 +133,8 @@ public class MainActivity extends Activity {
     // Remove prior-day rows only when the archived workbook matches every stored value.
     // This protects the only remaining copy of any transfer if an export is incomplete.
     private int removePreviouslyExportedDays() {
+synchronized (MainActivity.TRANSFER_DATA_LOCK) {
+
         String today = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
         String[] keys = {"rows_العمقي", "rows_بن دول » محمد علوي احمد"};
         String[] labels = {"العمقي", "بن دول"};
@@ -193,6 +197,8 @@ public class MainActivity extends Activity {
             }
         }
         return removed;
+    
+}
     }
 
     private void startBackgroundMonitor() {
