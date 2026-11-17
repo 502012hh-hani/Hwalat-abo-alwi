@@ -31,6 +31,7 @@ write = method(MAIN, "private int writeGroupToDownloads(")
 validate = method(MAIN, "private void validateXlsx(")
 cleanup = method(MAIN, "private int removePreviouslyExportedDays(")
 export = method(MAIN, "private void exportFiles()")
+export_one = method(MAIN, "private void exportOneGroup(")
 xlsx = method(MAIN, "private byte[] buildXlsxBytes(")
 save = method(LISTENER, "private void saveTransfer(")
 
@@ -73,9 +74,9 @@ assert "normalizeDuplicateAmount(row[1])" in xlsx
 assert "FFFFFF00" in xlsx
 
 # Both export and archive cleanup must use the same public Downloads subfolder.
-assert 'new File(downloads, "أبو طلال")' in write
+assert 'new File(downloads, "أبو علوي")' in write
 assert 'Environment.getExternalStoragePublicDirectory(' in cleanup
-assert '"أبو طلال")' in cleanup
+assert '"أبو علوي")' in cleanup
 
 # Android 10 compatibility is enforced by the validation build itself.
 assert 'requestLegacyExternalStorage", "true"' in BUILD
@@ -92,6 +93,21 @@ assert "synchronized (MainActivity.TRANSFER_DATA_LOCK)" in save
 
 # Notification writes remain append-only: duplicate rows are not discarded.
 assert 'row + (old.isEmpty() ? "" : "\\n" + old)' in save
+
+# Every export is built from a stable snapshot captured under the same lock
+# used by WhatsApp notification writes. The all-groups export captures both
+# groups together so a notification cannot split the batch between two states.
+assert "synchronized (TRANSFER_DATA_LOCK)" in export_one
+assert "getStoredDatesFromData(data)" in export_one
+assert "writeGroupToDownloads(label, prefKey, date, data)" in export_one
+assert "synchronized (TRANSFER_DATA_LOCK)" in export
+assert "String[] snapshots = new String[2]" in export
+assert "snapshots[0] = prefs.getString(keys[0], \"\")" in export
+assert "snapshots[1] = prefs.getString(keys[1], \"\")" in export
+assert "getStoredDatesFromData(snapshots[i])" in export
+assert "writeGroupToDownloads(labels[i], keys[i], date, snapshots[i])" in export
+assert "Download/أبو علوي" in export
+
 print("PASS: daily per-group/date XLSX snapshot contract")
 print("PASS: exported worksheet is checked against every stored cell")
 print("PASS: archived rows are pruned only after exact archive validation")
