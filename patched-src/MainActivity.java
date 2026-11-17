@@ -142,7 +142,7 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
         android.content.SharedPreferences.Editor edit = prefs.edit();
         int removed = 0;
         File dir = new File(Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOWNLOADS), "أبو طلال");
+                Environment.DIRECTORY_DOWNLOADS), "أبو علوي");
         for (int i = 0; i < keys.length; i++) {
             String data = prefs.getString(keys[i], "");
             if (TextUtils.isEmpty(data)) continue;
@@ -287,10 +287,15 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
 
     private void exportOneGroup(String label, String prefKey) {
         try {
-            TreeSet<String> dates = getStoredDates(prefKey);
+            // Capture one immutable group snapshot while notification writes are excluded.
+            String data;
+            synchronized (TRANSFER_DATA_LOCK) {
+                data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
+            }
+            TreeSet<String> dates = getStoredDatesFromData(data);
             if (dates.isEmpty()) throw new Exception("لا توجد سجلات صالحة للتصدير");
             int total = 0;
-            for (String date : dates) total += writeGroupToDownloads(label, prefKey, date);
+            for (String date : dates) total += writeGroupToDownloads(label, prefKey, date, data);
             Toast.makeText(this, "تم تحديث ملفات " + label + " حسب تواريخ الحوالات (" + dates.size() + " ملف، " + total + " سجل)", Toast.LENGTH_LONG).show();
         } catch (Exception ex) {
             String reason = ex.getMessage();
@@ -320,9 +325,8 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
         return s.split("\\n").length;
     }
 
-    private TreeSet<String> getStoredDates(String prefKey) {
+    private TreeSet<String> getStoredDatesFromData(String data) {
         TreeSet<String> dates = new TreeSet<>();
-        String data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
         if (!TextUtils.isEmpty(data)) {
             for (String row : data.split("\\n")) {
                 String[] p = row.split("\\t", -1);
@@ -336,16 +340,24 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
         try {
             String[] labels = {"العمقي", "بن دول"};
             String[] keys = {"rows_العمقي", "rows_بن دول » محمد علوي احمد"};
+            // Take both group snapshots under the same lock so no notification can
+            // land between the two reads and make this export batch inconsistent.
+            String[] snapshots = new String[2];
+            synchronized (TRANSFER_DATA_LOCK) {
+                android.content.SharedPreferences prefs = getSharedPreferences("hawalat", MODE_PRIVATE);
+                snapshots[0] = prefs.getString(keys[0], "");
+                snapshots[1] = prefs.getString(keys[1], "");
+            }
             int total = 0;
             int files = 0;
             for (int i = 0; i < labels.length; i++) {
-                for (String date : getStoredDates(keys[i])) {
-                    total += writeGroupToDownloads(labels[i], keys[i], date);
+                for (String date : getStoredDatesFromData(snapshots[i])) {
+                    total += writeGroupToDownloads(labels[i], keys[i], date, snapshots[i]);
                     files++;
                 }
             }
             if (files == 0) throw new Exception("لا توجد سجلات صالحة للتصدير");
-            Toast.makeText(this, "تم تحديث ملفات الحوالات حسب تواريخها (" + files + " ملف، " + total + " سجل). افتح Download/أبو طلال", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "تم تحديث ملفات الحوالات حسب تواريخها (" + files + " ملف، " + total + " سجل). افتح Download/أبو علوي", Toast.LENGTH_LONG).show();
         } catch (Exception ex) {
             String reason = ex.getMessage();
             if (reason == null || reason.trim().isEmpty()) reason = ex.getClass().getSimpleName();
@@ -353,9 +365,8 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
         }
     }
 
-    private int writeGroupToDownloads(String label, String prefKey, String date) throws Exception {
+    private int writeGroupToDownloads(String label, String prefKey, String date, String data) throws Exception {
         final String fileName = label + "-" + date + ".xlsx";
-        String data = getSharedPreferences("hawalat", MODE_PRIVATE).getString(prefKey, "");
         ArrayList<String[]> rows = new ArrayList<>();
         if (data != null && !data.isEmpty()) {
             for (String row : data.split("\\n")) {
@@ -379,7 +390,7 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
         }
 
         File downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-        File dir = new File(downloads, "أبو طلال");
+        File dir = new File(downloads, "أبو علوي");
         if (!dir.exists() && !dir.mkdirs() && !dir.isDirectory()) {
             throw new Exception("تعذر إنشاء مجلد التنزيلات: " + dir.getAbsolutePath());
         }
