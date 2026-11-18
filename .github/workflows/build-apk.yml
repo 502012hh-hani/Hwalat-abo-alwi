@@ -277,6 +277,7 @@ jobs:
           print("App label and launcher icon generated using Python standard library only")
           PY
       - name: Give test build a separate install identity
+        if: github.event_name == 'pull_request'
         shell: bash
         run: |
           python3 - <<'PY'
@@ -311,7 +312,14 @@ jobs:
           APKSIGNER="$(find "$SDK/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
-          echo "APK exists, is structurally valid, and has an Android debug signature"
+          AAPT="${APKSIGNER%/apksigner}/aapt"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            EXPECTED_ID="com.abualawi.hawalat.floating"
+          else
+            EXPECTED_ID="com.abualawi.hawalat"
+          fi
+          "$AAPT" dump badging "$APK" | grep -F "package: name='$EXPECTED_ID'"
+          echo "APK exists, has a debug signature, and its application ID matches the build event"
 
       - name: Save APK
         uses: actions/upload-artifact@v4
