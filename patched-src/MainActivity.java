@@ -66,6 +66,18 @@ public class MainActivity extends Activity {
         layout.addView(enable);
         enable.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
 
+        Button floatingImport = new Button(this);
+        floatingImport.setText("تفعيل زر استيراد الحوالات العائم فوق واتساب");
+        layout.addView(floatingImport);
+        floatingImport.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                Toast.makeText(this, "من خدمات إمكانية الوصول اختر حوالات أبو علوي ثم فعّل الخدمة. سيظهر الزر العائم فوق واتساب.", Toast.LENGTH_LONG).show();
+            } catch (Exception ex) {
+                Toast.makeText(this, "تعذر فتح إعدادات إمكانية الوصول", Toast.LENGTH_LONG).show();
+            }
+        });
+
         Button refresh = new Button(this);
         refresh.setText("تحديث حالة الاستقبال والسجل");
         layout.addView(refresh);
