@@ -295,3 +295,169 @@ jobs:
           name: Hawalat-Abu-Alawi-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      # Build a second, isolated companion app. The original app artifact above
+      # has already been uploaded and is not replaced or modified on the device.
+      - name: Prepare standalone floating-button test app
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("app/build.gradle")
+          s = p.read_text(encoding="utf-8")
+          s, n = re.subn(r"applicationId\\s+['\\\"]com\\.abualawi\\.hawalat['\\\"]",
+                         "applicationId 'com.abualawi.hawalat.floatingtest'", s, count=1)
+          if n != 1:
+              raise SystemExit("Could not assign separate package ID to floating test app")
+          p.write_text(s, encoding="utf-8")
+          m = Path("app/src/main/AndroidManifest.xml")
+          t = m.read_text(encoding="utf-8")
+          t = t.replace('android:label="أبو طلال"', 'android:label="زر الحوالات العائم - تجربة"')
+          m.write_text(t, encoding="utf-8")
+          main = Path("app/src/main/java/com/abualawi/hawalat/MainActivity.java")
+          main.write_text(r'''package com.abualawi.hawalat;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.os.Environment;
+          import android.provider.Settings;
+          import android.content.Intent;
+          import android.Manifest;
+          import android.content.pm.PackageManager;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+          import android.view.View;
+          import android.widget.Toast;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.nio.charset.StandardCharsets;
+          import java.text.SimpleDateFormat;
+          import java.util.Date;
+          import java.util.Locale;
+          import java.util.LinkedHashMap;
+          import java.util.ArrayList;
+          import java.util.Map;
+
+          public class MainActivity extends Activity {
+              public static final Object TRANSFER_DATA_LOCK = new Object();
+              private static final int REQ_STORAGE = 42;
+
+              @Override public void onCreate(Bundle state) {
+                  super.onCreate(state);
+                  LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setPadding(28, 36, 28, 28);
+                  box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                  TextView title = new TextView(this);
+                  title.setText("تجربة الزر العائم فقط");
+                  title.setTextSize(24);
+                  box.addView(title);
+                  TextView info = new TextView(this);
+                  info.setText("هذا تطبيق تجريبي مستقل. فعّل خدمة إمكانية الوصول، ثم افتح مجموعة العمقي أو بن دول في واتساب. سيظهر زر عائم. التصدير هنا منفصل عن ملفات التطبيق الأساسي.");
+                  info.setTextSize(16);
+                  info.setPadding(0, 18, 0, 18);
+                  box.addView(info);
+                  Button enable = new Button(this);
+                  enable.setText("تفعيل الزر العائم");
+                  box.addView(enable);
+                  enable.setOnClickListener(v -> {
+                      startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                      Toast.makeText(this, "اختر خدمة «زر الحوالات العائم - تجربة» وفعّلها", Toast.LENGTH_LONG).show();
+                  });
+                  Button export = new Button(this);
+                  export.setText("تصدير سجلات التجربة إلى Excel");
+                  box.addView(export);
+                  export.setOnClickListener(v -> exportCsv());
+                  setContentView(box);
+                  if (android.os.Build.VERSION.SDK_INT >= 23 &&
+                      checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                      requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+                  }
+              }
+
+              private String csv(String value) {
+                  String x = value == null ? "" : value;
+                  return "\"" + x.replace("\"", "\"\"") + "\"";
+              }
+
+              private void exportCsv() {
+                  if (android.os.Build.VERSION.SDK_INT >= 23 &&
+                      checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                      requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+                      Toast.makeText(this, "اسمح بصلاحية الملفات ثم اضغط التصدير مرة أخرى", Toast.LENGTH_LONG).show();
+                      return;
+                  }
+                  try {
+                      File folder = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                              "أبو طلال - تجربة الزر العائم");
+                      if (!folder.exists() && !folder.mkdirs()) throw new Exception("تعذر إنشاء مجلد التصدير");
+                      String[] keys = {"rows_العمقي", "rows_بن دول » محمد علوي احمد"};
+                      String[] names = {"العمقي", "بن دول"};
+                      android.content.SharedPreferences prefs = getSharedPreferences("hawalat", MODE_PRIVATE);
+                      int total = 0;
+                      for (int g = 0; g < keys.length; g++) {
+                          String data;
+                          synchronized (TRANSFER_DATA_LOCK) { data = prefs.getString(keys[g], ""); }
+                          Map<String, ArrayList<String[]>> byDate = new LinkedHashMap<>();
+                          for (String line : data.split("\\n")) {
+                              String[] p = line.split("\\t", -1);
+                              if (p.length >= 4) {
+                                  ArrayList<String[]> rows = byDate.get(p[0]);
+                                  if (rows == null) { rows = new ArrayList<>(); byDate.put(p[0], rows); }
+                                  rows.add(p);
+                              }
+                          }
+                          for (Map.Entry<String, ArrayList<String[]>> entry : byDate.entrySet()) {
+                              StringBuilder out = new StringBuilder("\uFEFF");
+                              out.append("اسم المستلم,المبلغ,التاريخ,الوقت\r\n");
+                              for (String[] p : entry.getValue()) {
+                                  out.append(csv(p[2])).append(',')
+                                     .append(csv(p[3])).append(',')
+                                     .append(csv(p[0])).append(',')
+                                     .append(csv(p[1])).append("\r\n");
+                              }
+                              File file = new File(folder, names[g] + "-" + entry.getKey() + ".csv");
+                              try (FileOutputStream stream = new FileOutputStream(file, false)) {
+                                  stream.write(out.toString().getBytes(StandardCharsets.UTF_8));
+                                  stream.flush();
+                                  stream.getFD().sync();
+                              }
+                              total += entry.getValue().size();
+                          }
+                      }
+                      Toast.makeText(this, "تم تصدير " + total + " سجل إلى مجلد التنزيلات: أبو طلال - تجربة الزر العائم", Toast.LENGTH_LONG).show();
+                  } catch (Exception e) {
+                      Toast.makeText(this, "تعذر التصدير: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+          }
+          ''', encoding="utf-8")
+          print("Standalone companion app prepared; separate package and separate CSV export folder.")
+          PY
+
+      - name: Build standalone floating-button test APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify standalone floating test APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          test "$(stat -c%s "$APK")" -gt 10000
+          unzip -t "$APK"
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          APKSIGNER="$(find "$SDK/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          "$SDK/build-tools/$(basename "$(dirname "$APKSIGNER")")/aapt" dump badging "$APK" | grep -F "package: name='com.abualawi.hawalat.floatingtest'"
+          echo "Separate floating test APK verified."
+
+      - name: Save standalone floating-button test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Abu-Talal-Floating-Test
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
