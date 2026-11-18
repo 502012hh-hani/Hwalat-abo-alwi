@@ -19,8 +19,9 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Floating import entry point. It reads only text exposed by WhatsApp's
@@ -33,6 +34,7 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
     private boolean busy = false;
     private String lastDetectedGroup = "";
     private long lastScanStartedAt = 0L;
+    private String scanDate = "";
     private static final int MAX_SCAN_PAGES = 100;
 
     @Override public void onServiceConnected() {
@@ -83,14 +85,23 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
     private String detectOpenGroup() {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null) return "";
-        String pkg = String.valueOf(root.getPackageName());
-        if (!"com.whatsapp".equals(pkg) && !"com.whatsapp.w4b".equals(pkg)) return "";
-        StringBuilder text = new StringBuilder();
-        collectText(root, text, 0);
-        String s = text.toString();
-        if (s.contains("العمقي") || s.contains("العمقى")) return "العمقي";
-        if (s.contains("بن دول") || s.contains("محمد علوي احمد")) return "بن دول » محمد علوي احمد";
-        return "";
+        try {
+            String pkg = String.valueOf(root.getPackageName());
+            if (!"com.whatsapp".equals(pkg) && !"com.whatsapp.w4b".equals(pkg)) return "";
+            StringBuilder text = new StringBuilder();
+            collectText(root, text, 0);
+            String[] lines = text.toString().split("\\n");
+            // The conversation title is near the beginning of the tree. Prefer
+            // it over older message text that may mention the other group.
+            for (int i = 0; i < Math.min(lines.length, 12); i++) {
+                String line = lines[i];
+                if (line.contains("بن دول") || line.contains("محمد علوي احمد")) return "بن دول » محمد علوي احمد";
+                if (line.contains("العمقي") || line.contains("العمقى")) return "العمقي";
+            }
+            return "";
+        } finally {
+            root.recycle();
+        }
     }
 
     private void startFullDayScan(String group, boolean manual) {
@@ -99,6 +110,7 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
         if (!manual && now - lastScanStartedAt < 12000L) return;
         busy = true;
         lastScanStartedAt = now;
+        scanDate = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(now));
         if (button != null) button.setText("⏳ جارٍ فحص رسائل اليوم");
         Toast.makeText(this, "بدأ فحص رسائل اليوم في " + group, Toast.LENGTH_SHORT).show();
         ArrayList<String> pages = new ArrayList<>();
@@ -112,14 +124,22 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
         }
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null) { finishScan(group, pages, "تعذر الوصول إلى شاشة واتساب"); return; }
+        String pkg = String.valueOf(root.getPackageName());
+        if (!"com.whatsapp".equals(pkg) && !"com.whatsapp.w4b".equals(pkg)) {
+            root.recycle();
+            finishScan(group, pages, "توقف الفحص لأن الشاشة لم تعد واتساب");
+            return;
+        }
         StringBuilder visible = new StringBuilder();
         collectText(root, visible, 0);
         String pageText = visible.toString();
         if (!pageText.trim().isEmpty()) pages.add(pageText);
 
-        // WhatsApp's date divider is used as the stopping boundary. We keep
-        // the page containing the divider so the final parser can exclude older content.
-        if (containsYesterdayOrOlderDivider(pageText)) {
+        // Keep the boundary page. The parser removes content before yesterday's
+        // divider, because today's messages appear below that divider in chat order.
+        boolean reachedYesterday = containsYesterdayOrOlderDivider(pageText);
+        if (reachedYesterday) {
+            root.recycle();
             finishScan(group, pages, "تم الوصول إلى فاصل ما قبل اليوم");
             return;
         }
@@ -152,20 +172,24 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
 
     private void finishScan(String group, ArrayList<String> pages, String reason) {
         StringBuilder all = new StringBuilder();
-        for (int i = pages.size() - 1; i >= 0; i--) all.append(pages.get(i)).append("\\n");
-        // The parser stores only records it can identify; raw pages are retained
-        // for review instead of silently discarding text it cannot parse.
-        int added = parseAndSave(all.toString(), group);
-        String date = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
+        for (int i = pages.size() - 1; i >= 0; i--) {
+            if (all.length() > 0) all.append('\n');
+            all.append(pages.get(i));
+        }
+        String date = scanDate.isEmpty()
+                ? new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date()) : scanDate;
+        List<FloatingImportParser.Transfer> parsed = FloatingImportParser.parsePages(pages);
+        int added = saveParsedTransfers(parsed, group, date);
         getSharedPreferences("hawalat", MODE_PRIVATE).edit()
                 .putString("last_scan_raw_" + (group.equals("العمقي") ? "amqi" : "bindol"), all.toString())
                 .putString("last_scan_report", "المجموعة: " + group + "؛ التاريخ: " + date
-                        + "؛ الشاشات المقروءة: " + pages.size() + "؛ السجلات المضافة: " + added
-                        + "؛ النتيجة: " + reason).commit();
+                        + "؛ الشاشات المقروءة: " + pages.size() + "؛ الرسائل القابلة للتحليل: "
+                        + parsed.size() + "؛ السجلات الجديدة: " + added + "؛ النتيجة: " + reason).commit();
         busy = false;
         if (button != null) button.setText("📥 إعادة استيراد حوالات اليوم");
-        Toast.makeText(this, "انتهى الفحص: " + pages.size() + " شاشة، أضيف " + added
-                + " سجل. " + reason + ". راجع السجلات غير المحللة قبل اعتماد التقرير.", Toast.LENGTH_LONG).show();
+        Toast.makeText(this, "انتهى الفحص: " + pages.size() + " شاشة؛ "
+                + parsed.size() + " رسالة قابلة للتحليل؛ أضيف " + added
+                + " سجل جديد دون إعادة استيراد الموجود. " + reason, Toast.LENGTH_LONG).show();
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
@@ -196,56 +220,70 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
         if (t != null && t.length() > 0) out.append(t).append('\n');
         CharSequence d = node.getContentDescription();
         if (d != null && d.length() > 0) out.append(d).append('\n');
-        for (int i=0; i<node.getChildCount(); i++) {
+        for (int i = 0; i < node.getChildCount(); i++) {
             AccessibilityNodeInfo child = node.getChild(i);
             if (child != null) {
-                collectText(child, out, depth+1);
-                child.recycle();
+                try { collectText(child, out, depth + 1); }
+                finally { child.recycle(); }
             }
         }
     }
 
-    private int parseAndSave(String screen, String group) {
-        String sender = "ابو علوي رقم جديد";
-        if (!screen.contains(sender)) {
-            Toast.makeText(this, "لم تظهر رسائل المرسل «ابو علوي رقم جديد» في الشاشة الحالية", Toast.LENGTH_LONG).show();
-            return 0;
-        }
-        String date = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
-        String time = new SimpleDateFormat("HH:mm", Locale.US).format(new Date());
-        Pattern namePattern = Pattern.compile("(?:الاسم|المستلم|اسم\\s*المستلم)\\s*[:：/\\-]?\\s*([\\p{L}ء-يـ ]{4,})");
-        Pattern amountPattern = Pattern.compile("(?<![\\d٠-٩])([0-9٠-٩][0-9٠-٩٬,٫.]*)");
-        Matcher nm = namePattern.matcher(screen);
-        Matcher am = amountPattern.matcher(screen);
-        ArrayList<String> names = new ArrayList<>();
-        ArrayList<String> amounts = new ArrayList<>();
-        while (nm.find()) names.add(nm.group(1).replaceAll("[\\s.،؛]+$","").trim());
-        while (am.find()) amounts.add(am.group(1).replace("٬","").replace(",","").replace("٫","."));
-        if (names.isEmpty() || amounts.isEmpty()) return 0;
-
+    private int saveParsedTransfers(List<FloatingImportParser.Transfer> transfers, String group, String date) {
         SharedPreferences prefs = getSharedPreferences("hawalat", MODE_PRIVATE);
         String key = group.equals("العمقي") ? "rows_العمقي" : "rows_بن دول » محمد علوي احمد";
         synchronized (MainActivity.TRANSFER_DATA_LOCK) {
             String old = prefs.getString(key, "");
-            StringBuilder next = new StringBuilder(old);
-            int count = Math.min(names.size(), amounts.size());
+            Map<String, Integer> storedCounts = new HashMap<>();
+            if (!old.isEmpty()) {
+                for (String line : old.split("\\n")) {
+                    String[] p = line.split("\\t", -1);
+                    if (p.length >= 4) {
+                        String fingerprint = FloatingImportParser.fingerprint(p[0], p[1], p[2], p[3]);
+                        Integer count = storedCounts.get(fingerprint);
+                        storedCounts.put(fingerprint, count == null ? 1 : count + 1);
+                    }
+                }
+            }
+
+            Map<String, Integer> scanCounts = new HashMap<>();
+            StringBuilder additions = new StringBuilder();
             int added = 0;
-            for (int i=0; i<count; i++) {
-                String row = date + "\t" + time + "\t" + names.get(i) + "\t" + amounts.get(i);
-                if (old.contains(row) || next.indexOf(row) >= 0) continue;
-                if (next.length() > 0) next.append('\n');
-                next.append(row);
+            for (FloatingImportParser.Transfer transfer : transfers) {
+                String fingerprint = FloatingImportParser.fingerprint(
+                        date, transfer.time, transfer.name, transfer.amount);
+                Integer seen = scanCounts.get(fingerprint);
+                int occurrence = (seen == null ? 0 : seen) + 1;
+                scanCounts.put(fingerprint, occurrence);
+                Integer stored = storedCounts.get(fingerprint);
+                int alreadyStored = stored == null ? 0 : stored;
+                // Count occurrences rather than unique names: legitimate repeated
+                // transfers remain separate, while a rescan is idempotent.
+                if (occurrence <= alreadyStored) continue;
+                String row = date + "\\t" + transfer.time + "\\t" + transfer.name + "\\t" + transfer.amount;
+                if (additions.length() > 0) additions.append('\n');
+                additions.append(row);
+                storedCounts.put(fingerprint, occurrence);
                 added++;
             }
-            prefs.edit().putString(key, next.toString())
-                    .putString("last_floating_import", "تمت قراءة الشاشة الظاهرة " + date + " " + time
-                            + "؛ أضيف " + added + " سجل (يلزم مراجعة الرسائل غير الظاهرة).").commit();
+
+            String next = additions.length() == 0 ? old
+                    : additions.toString() + (old.isEmpty() ? "" : "\\n" + old);
+            prefs.edit().putString(key, next)
+                    .putString("last_floating_import", "فحص " + date + " في " + group
+                            + "؛ رسائل قابلة للتحليل: " + transfers.size()
+                            + "؛ سجلات جديدة: " + added + "؛ التكرارات الموجودة لم تُضف مرة أخرى.")
+                    .commit();
             return added;
         }
     }
 
-    @Override public void onInterrupt() { }
+    @Override public void onInterrupt() {
+        handler.removeCallbacksAndMessages(null);
+        busy = false;
+    }
     @Override public void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
         if (button != null && windowManager != null) {
             try { windowManager.removeView(button); } catch (Exception ignored) { }
         }
