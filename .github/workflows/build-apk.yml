@@ -35,6 +35,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Test floating WhatsApp import parser and repeat scans
+        run: python3 tests/test_floating_import_parser.py
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -58,6 +61,7 @@ jobs:
           cp patched-src/MainActivity.java app/src/main/java/com/abualawi/hawalat/MainActivity.java
           cp patched-src/WhatsAppNotificationListener.java app/src/main/java/com/abualawi/hawalat/WhatsAppNotificationListener.java
           cp patched-src/KeepAliveService.java app/src/main/java/com/abualawi/hawalat/KeepAliveService.java
+          cp patched-src/FloatingImportParser.java app/src/main/java/com/abualawi/hawalat/FloatingImportParser.java
           # Add the floating WhatsApp importer and its accessibility metadata.
           cp recovered-source/app/src/main/java/com/abualawi/hawalat/WhatsAppFloatingImportService.java app/src/main/java/com/abualawi/hawalat/WhatsAppFloatingImportService.java
           mkdir -p app/src/main/res/xml app/src/main/res/values
