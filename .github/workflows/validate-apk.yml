@@ -37,6 +37,9 @@ jobs:
       - name: Run production XLSX writer round-trip on JVM
         run: python3 tests/test_xlsx_export_runtime.py
 
+      - name: Test floating WhatsApp import parser and repeat scans
+        run: python3 tests/test_floating_import_parser.py
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
