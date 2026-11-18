@@ -99,13 +99,41 @@ public final class FloatingImportParser {
         }
     }
 
+    public static List<Transfer> onlyNewOccurrences(List<Transfer> scan, String existingRows, String date) {
+        ArrayList<Transfer> additions = new ArrayList<>();
+        java.util.HashMap<String, Integer> storedCounts = new java.util.HashMap<>();
+        if (existingRows != null && !existingRows.isEmpty()) {
+            for (String line : existingRows.split("\\n")) {
+                String[] p = line.split("\\t", -1);
+                if (p.length >= 4) {
+                    String key = fingerprint(p[0], p[1], p[2], p[3]);
+                    Integer count = storedCounts.get(key);
+                    storedCounts.put(key, count == null ? 1 : count + 1);
+                }
+            }
+        }
+        java.util.HashMap<String, Integer> scanCounts = new java.util.HashMap<>();
+        if (scan != null) for (Transfer transfer : scan) {
+            String key = fingerprint(date, transfer.time, transfer.name, transfer.amount);
+            Integer seen = scanCounts.get(key);
+            int occurrence = (seen == null ? 0 : seen) + 1;
+            scanCounts.put(key, occurrence);
+            Integer stored = storedCounts.get(key);
+            int alreadyStored = stored == null ? 0 : stored;
+            if (occurrence > alreadyStored) {
+                additions.add(transfer);
+                storedCounts.put(key, occurrence);
+            }
+        }
+        return additions;
+    }
+
     private static String keepTodayPart(String page) {
         if (page == null || page.isEmpty()) return "";
         String[] lines = page.split("\\r?\\n", -1);
         for (int i = 0; i < lines.length; i++) {
             String line = normalizeArabic(lines[i]).toLowerCase(Locale.ROOT).trim();
-            if (line.equals("امس") || line.startsWith("امس ") || line.equals("yesterday")
-                    || line.startsWith("yesterday ")) {
+            if (line.startsWith("امس") || line.equals("yesterday") || line.startsWith("yesterday")) {
                 StringBuilder today = new StringBuilder();
                 for (int j = i + 1; j < lines.length; j++) {
                     if (today.length() > 0) today.append('\n');
