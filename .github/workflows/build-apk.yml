@@ -3,6 +3,8 @@ name: Build installable Android APK (automatic debug signing)
 on:
   # Build an installable debug-signed APK; no permanent keystore secrets required.
   workflow_dispatch:
+  pull_request:
+    branches: [ "main" ]
   push:
     branches: [ "main" ]
     paths:
