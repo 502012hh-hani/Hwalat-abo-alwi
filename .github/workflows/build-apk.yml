@@ -11,6 +11,7 @@ on:
       - ".github/workflows/build-apk.yml"
       - "patched-src/**"
       - "HawalatAbuAlawi-source.zip"
+      - "recovered-source/**"
 
 permissions:
   contents: read
