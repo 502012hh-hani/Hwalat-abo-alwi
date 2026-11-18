@@ -260,15 +260,19 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
-          import re
           from pathlib import Path
           p = Path("app/build.gradle")
-          s = p.read_text(encoding="utf-8")
-          updated, count = re.subn(r"applicationId\\s+['\\\"]com\\.abualawi\\.hawalat['\\\"]", "applicationId 'com.abualawi.hawalat.test'", s, count=1)
+          source = p.read_text(encoding="utf-8")
+          old_id = "applicationId 'com.abualawi.hawalat'"
+          new_id = "applicationId 'com.abualawi.hawalat.floating'"
+          count = source.count(old_id)
           if count != 1:
-              raise SystemExit("Could not safely set the separate test applicationId")
-          p.write_text(updated, encoding="utf-8")
-          print("Test APK package: com.abualawi.hawalat.test (keeps the installed app untouched)")
+              raise SystemExit(f"Expected exactly one original applicationId, found {count}")
+          source = source.replace(old_id, new_id, 1)
+          if new_id not in source:
+              raise SystemExit("Separate floating applicationId was not written")
+          p.write_text(source, encoding="utf-8")
+          print("Install identity verified: com.abualawi.hawalat.floating")
           PY
 
       - name: Build automatically signed debug APK
@@ -313,7 +317,7 @@ jobs:
           s = s.replace(old_id, new_id, 1)
           if n != 1:
               raise SystemExit("Could not assign separate package ID to floating test app")
-                    p.write_text(s, encoding="utf-8")
+          p.write_text(s, encoding="utf-8")
           m = Path("app/src/main/AndroidManifest.xml")
           t = m.read_text(encoding="utf-8")
           t = t.replace('android:label="أبو طلال"', 'android:label="زر الحوالات العائم - تجربة"')
