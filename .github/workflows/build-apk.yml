@@ -56,6 +56,11 @@ jobs:
           cp patched-src/MainActivity.java app/src/main/java/com/abualawi/hawalat/MainActivity.java
           cp patched-src/WhatsAppNotificationListener.java app/src/main/java/com/abualawi/hawalat/WhatsAppNotificationListener.java
           cp patched-src/KeepAliveService.java app/src/main/java/com/abualawi/hawalat/KeepAliveService.java
+          # Add the floating WhatsApp importer and its accessibility metadata.
+          cp recovered-source/app/src/main/java/com/abualawi/hawalat/WhatsAppFloatingImportService.java app/src/main/java/com/abualawi/hawalat/WhatsAppFloatingImportService.java
+          mkdir -p app/src/main/res/xml app/src/main/res/values
+          cp recovered-source/app/src/main/res/xml/whatsapp_floating_accessibility.xml app/src/main/res/xml/whatsapp_floating_accessibility.xml
+          cp recovered-source/app/src/main/res/values/strings.xml app/src/main/res/values/floating_import_strings.xml
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           from pathlib import Path
@@ -97,8 +102,30 @@ jobs:
               keepalive = ET.SubElement(app, "service")
               keepalive.set(android + "name", ".KeepAliveService")
           keepalive.set(android + "exported", "false")
+          floating = None
+          for item in app.findall("service"):
+              if item.get(android + "name", "") in (".WhatsAppFloatingImportService", "com.abualawi.hawalat.WhatsAppFloatingImportService"):
+                  floating = item
+                  break
+          if floating is None:
+              floating = ET.SubElement(app, "service")
+              floating.set(android + "name", ".WhatsAppFloatingImportService")
+          floating.set(android + "permission", "android.permission.BIND_ACCESSIBILITY_SERVICE")
+          floating.set(android + "exported", "true")
+          action_name = "android.accessibilityservice.AccessibilityService"
+          if not any(a.get(android + "name") == action_name for f in floating.findall("intent-filter") for a in f.findall("action")):
+              filt = ET.SubElement(floating, "intent-filter")
+              ET.SubElement(filt, "action").set(android + "name", action_name)
+          metadata = None
+          for item in floating.findall("meta-data"):
+              if item.get(android + "name") == "android.accessibilityservice":
+                  metadata = item
+          if metadata is None:
+              metadata = ET.SubElement(floating, "meta-data")
+          metadata.set(android + "name", "android.accessibilityservice")
+          metadata.set(android + "resource", "@xml/whatsapp_floating_accessibility")
           tree.write(p, encoding="utf-8", xml_declaration=True)
-          print("Notification listener and foreground keep-alive services verified")
+          print("Notification listener, keep-alive and floating accessibility services configured")
           PY
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
