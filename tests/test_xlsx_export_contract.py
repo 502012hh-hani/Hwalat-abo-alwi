@@ -46,6 +46,14 @@ assert 'new FileOutputStream(temp, false)' in write
 assert "validateXlsx(temp, rows)" in write
 assert "validateXlsx(target, rows)" in write
 
+# Recover safely if Android was interrupted after moving the previous workbook
+# to .bak but before installing the new validated XLSX.
+assert "boolean backupWasRecovery = !hadTarget && backup.exists();" in write
+assert "boolean targetMovedToBackup = false;" in write
+assert write.index("validateXlsx(temp, rows)") < write.index("if (backup.exists() && !backup.delete())")
+assert "if (targetMovedToBackup || backupWasRecovery)" in write
+assert "if (!target.exists() && backup.exists() && !backup.renameTo(target))" in write
+
 # The validator must compare the actual four-column worksheet contents to the store.
 for required_part in (
     '"[Content_Types].xml"',

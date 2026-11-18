@@ -66,6 +66,18 @@ public class MainActivity extends Activity {
         layout.addView(enable);
         enable.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
 
+        Button floatingImport = new Button(this);
+        floatingImport.setText("تفعيل زر استيراد الحوالات العائم فوق واتساب");
+        layout.addView(floatingImport);
+        floatingImport.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                Toast.makeText(this, "من خدمات إمكانية الوصول اختر حوالات أبو علوي ثم فعّل الخدمة. سيظهر الزر العائم فوق واتساب.", Toast.LENGTH_LONG).show();
+            } catch (Exception ex) {
+                Toast.makeText(this, "تعذر فتح إعدادات إمكانية الوصول", Toast.LENGTH_LONG).show();
+            }
+        });
+
         Button refresh = new Button(this);
         refresh.setText("تحديث حالة الاستقبال والسجل");
         layout.addView(refresh);
@@ -415,6 +427,10 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
         File temp = new File(dir, fileName + ".tmp");
         File backup = new File(dir, fileName + ".bak");
         boolean hadTarget = target.exists();
+        // A previous process may have stopped after moving the old workbook to
+        // .bak. Preserve that recovery copy until the replacement is validated.
+        boolean backupWasRecovery = !hadTarget && backup.exists();
+        boolean targetMovedToBackup = false;
         try {
             try (FileOutputStream out = new FileOutputStream(temp, false)) {
                 out.write(bytes);
@@ -422,11 +438,16 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
                 out.getFD().sync();
             }
             validateXlsx(temp, rows);
-            if (backup.exists() && !backup.delete()) {
-                throw new Exception("تعذر حذف النسخة الاحتياطية السابقة: " + backup.getName());
-            }
-            if (hadTarget && !target.renameTo(backup)) {
-                throw new Exception("تعذر حفظ نسخة احتياطية من ملف اليوم: " + target.getName());
+            if (hadTarget) {
+                // The new temp file is already valid; it is now safe to retire
+                // any stale backup before moving the current target into .bak.
+                if (backup.exists() && !backup.delete()) {
+                    throw new Exception("تعذر حذف النسخة الاحتياطية السابقة: " + backup.getName());
+                }
+                if (!target.renameTo(backup)) {
+                    throw new Exception("تعذر حفظ نسخة احتياطية من ملف اليوم: " + target.getName());
+                }
+                targetMovedToBackup = true;
             }
             if (!temp.renameTo(target)) {
                 throw new Exception("تعذر اعتماد ملف Excel في التنزيلات: " + target.getAbsolutePath());
@@ -446,12 +467,12 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
             return rows.size();
         } catch (Exception ex) {
             if (temp.exists()) temp.delete();
-            if (hadTarget && backup.exists()) {
+            if (targetMovedToBackup || backupWasRecovery) {
                 if (target.exists() && !target.delete()) {
                     android.util.Log.e("HawalatExport", "Could not remove invalid replacement: "
                             + target.getAbsolutePath());
                 }
-                if (!target.exists() && !backup.renameTo(target)) {
+                if (!target.exists() && backup.exists() && !backup.renameTo(target)) {
                     android.util.Log.e("HawalatExport", "Could not restore previous workbook from: "
                             + backup.getAbsolutePath());
                 }

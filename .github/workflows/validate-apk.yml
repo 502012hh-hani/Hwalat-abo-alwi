@@ -37,6 +37,9 @@ jobs:
       - name: Run production XLSX writer round-trip on JVM
         run: python3 tests/test_xlsx_export_runtime.py
 
+      - name: Test floating WhatsApp import parser and repeat scans
+        run: python3 tests/test_floating_import_parser.py
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -60,6 +63,11 @@ jobs:
           cp patched-src/MainActivity.java app/src/main/java/com/abualawi/hawalat/MainActivity.java
           cp patched-src/WhatsAppNotificationListener.java app/src/main/java/com/abualawi/hawalat/WhatsAppNotificationListener.java
           cp patched-src/KeepAliveService.java app/src/main/java/com/abualawi/hawalat/KeepAliveService.java
+          cp patched-src/FloatingImportParser.java app/src/main/java/com/abualawi/hawalat/FloatingImportParser.java
+          cp recovered-source/app/src/main/java/com/abualawi/hawalat/WhatsAppFloatingImportService.java app/src/main/java/com/abualawi/hawalat/WhatsAppFloatingImportService.java
+          mkdir -p app/src/main/res/xml app/src/main/res/values
+          cp recovered-source/app/src/main/res/xml/whatsapp_floating_accessibility.xml app/src/main/res/xml/whatsapp_floating_accessibility.xml
+          cp recovered-source/app/src/main/res/values/strings.xml app/src/main/res/values/floating_import_strings.xml
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           from pathlib import Path
@@ -101,8 +109,31 @@ jobs:
               keepalive = ET.SubElement(app, "service")
               keepalive.set(android + "name", ".KeepAliveService")
           keepalive.set(android + "exported", "false")
+          floating = None
+          for item in app.findall("service"):
+              if item.get(android + "name", "") in (".WhatsAppFloatingImportService", "com.abualawi.hawalat.WhatsAppFloatingImportService"):
+                  floating = item
+                  break
+          if floating is None:
+              floating = ET.SubElement(app, "service")
+              floating.set(android + "name", ".WhatsAppFloatingImportService")
+          floating.set(android + "permission", "android.permission.BIND_ACCESSIBILITY_SERVICE")
+          floating.set(android + "exported", "true")
+          action_name = "android.accessibilityservice.AccessibilityService"
+          if not any(a.get(android + "name") == action_name for f in floating.findall("intent-filter") for a in f.findall("action")):
+              filt = ET.SubElement(floating, "intent-filter")
+              ET.SubElement(filt, "action").set(android + "name", action_name)
+          metadata = None
+          for item in floating.findall("meta-data"):
+              if item.get(android + "name") == "android.accessibilityservice":
+                  metadata = item
+                  break
+          if metadata is None:
+              metadata = ET.SubElement(floating, "meta-data")
+          metadata.set(android + "name", "android.accessibilityservice")
+          metadata.set(android + "resource", "@xml/whatsapp_floating_accessibility")
           tree.write(p, encoding="utf-8", xml_declaration=True)
-          print("Notification listener and foreground keep-alive services verified")
+          print("Notification listener, keep-alive and floating accessibility services verified")
           PY
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
@@ -185,15 +216,13 @@ jobs:
       - name: Apply Abu Talal app name and launcher icon
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-noto-core
-          python3 -m pip install --user pillow
           python3 - <<'PY'
-          import os
-          import subprocess
+          import binascii
+          import struct
           import xml.etree.ElementTree as ET
+          import zlib
           from pathlib import Path
-          from PIL import Image, ImageDraw, ImageFont
+
           root = Path("app/src/main")
           manifest = root / "AndroidManifest.xml"
           android = "{http://schemas.android.com/apk/res/android}"
@@ -205,32 +234,49 @@ jobs:
           app.set(android + "label", "أبو طلال")
           app.set(android + "icon", "@mipmap/ic_launcher")
           tree.write(manifest, encoding="utf-8", xml_declaration=True)
-          font_path = subprocess.check_output(
-              ["fc-match", "Noto Sans Arabic:style=Bold", "-f", "%{file}"],
-              text=True
-          ).strip()
-          if not font_path or not Path(font_path).is_file():
-              raise SystemExit("Arabic font for launcher icon was not found")
-          for density, size in [("mdpi",48),("hdpi",72),("xhdpi",96),("xxhdpi",144),("xxxhdpi",192)]:
-              image = Image.new("RGB", (size, size), (12, 28, 48))
-              draw = ImageDraw.Draw(image)
-              scale = size / 192
-              margin = max(2, int(7 * scale))
-              draw.rounded_rectangle((margin, margin, size-margin, size-margin),
-                                     radius=int(34*scale), fill=(12,28,48),
-                                     outline=(226,184,92), width=max(1,int(4*scale)))
-              draw.ellipse((int(22*scale),int(22*scale),int(170*scale),int(170*scale)),
-                           outline=(226,184,92), width=max(1,int(2*scale)))
-              font = ImageFont.truetype(font_path, max(8,int(31*scale)))
-              draw.text((size/2,size/2), "أبو طلال", font=font, fill=(255,245,220),
-                        anchor="mm", direction="rtl", language="ar",
-                        stroke_width=max(0,int(scale)), stroke_fill=(12,28,48))
+
+          def chunk(kind, data):
+              return (struct.pack(">I", len(data)) + kind + data
+                      + struct.pack(">I", binascii.crc32(kind + data) & 0xffffffff))
+
+          def make_png(size):
+              scale = 192.0 / size
+              raw = bytearray()
+              for y in range(size):
+                  raw.append(0)
+                  for x in range(size):
+                      bx, by = x * scale, y * scale
+                      color = (12, 28, 48)
+                      if 7 <= bx <= 185 and 7 <= by <= 185 and (
+                          bx < 12 or bx > 180 or by < 12 or by > 180
+                      ):
+                          color = (226, 184, 92)
+                      # Two opposing transfer arrows, rendered without external fonts.
+                      if 42 <= by <= 50 and 52 <= bx <= 140:
+                          color = (255, 245, 220)
+                      if 42 <= by <= 74 and 132 <= bx <= 142 and bx - 132 <= by - 42:
+                          color = (255, 245, 220)
+                      if 42 <= by <= 74 and 132 <= bx <= 142 and 74 - by >= bx - 132:
+                          color = (255, 245, 220)
+                      if 112 <= by <= 120 and 52 <= bx <= 140:
+                          color = (226, 184, 92)
+                      if 88 <= by <= 120 and 50 <= bx <= 60 and by - 88 >= 60 - bx:
+                          color = (226, 184, 92)
+                      if 88 <= by <= 120 and 50 <= bx <= 60 and 120 - by >= 60 - bx:
+                          color = (226, 184, 92)
+                      raw.extend(color)
+              header = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)
+              return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+                      + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+                      + chunk(b"IEND", b""))
+
+          for density, size in [("mdpi", 48), ("hdpi", 72), ("xhdpi", 96),
+                                ("xxhdpi", 144), ("xxxhdpi", 192)]:
               out = root / "res" / ("mipmap-" + density) / "ic_launcher.png"
               out.parent.mkdir(parents=True, exist_ok=True)
-              image.save(out, format="PNG", optimize=True)
-          print("App label and Arabic launcher icon set to أبو طلال")
+              out.write_bytes(make_png(size))
+          print("App label and launcher icon generated using Python standard library only")
           PY
-
       - name: Build debug APK for validation only
         run: gradle --no-daemon :app:assembleDebug
 

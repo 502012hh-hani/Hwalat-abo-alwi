@@ -3,12 +3,15 @@ name: Build installable Android APK (automatic debug signing)
 on:
   # Build an installable debug-signed APK; no permanent keystore secrets required.
   workflow_dispatch:
+  pull_request:
+    branches: [ "main" ]
   push:
     branches: [ "main" ]
     paths:
       - ".github/workflows/build-apk.yml"
       - "patched-src/**"
       - "HawalatAbuAlawi-source.zip"
+      - "recovered-source/**"
 
 permissions:
   contents: read
@@ -33,6 +36,18 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Test seven Al-Amqi regression messages
+        run: python3 tests/test_transfer_patterns.py
+
+      - name: Test daily XLSX export and archive-safety contract
+        run: python3 tests/test_xlsx_export_contract.py
+
+      - name: Run production XLSX writer round-trip on JVM
+        run: python3 tests/test_xlsx_export_runtime.py
+
+      - name: Test floating WhatsApp import parser and repeat scans
+        run: python3 tests/test_floating_import_parser.py
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -56,6 +71,12 @@ jobs:
           cp patched-src/MainActivity.java app/src/main/java/com/abualawi/hawalat/MainActivity.java
           cp patched-src/WhatsAppNotificationListener.java app/src/main/java/com/abualawi/hawalat/WhatsAppNotificationListener.java
           cp patched-src/KeepAliveService.java app/src/main/java/com/abualawi/hawalat/KeepAliveService.java
+          cp patched-src/FloatingImportParser.java app/src/main/java/com/abualawi/hawalat/FloatingImportParser.java
+          # Add the floating WhatsApp importer and its accessibility metadata.
+          cp recovered-source/app/src/main/java/com/abualawi/hawalat/WhatsAppFloatingImportService.java app/src/main/java/com/abualawi/hawalat/WhatsAppFloatingImportService.java
+          mkdir -p app/src/main/res/xml app/src/main/res/values
+          cp recovered-source/app/src/main/res/xml/whatsapp_floating_accessibility.xml app/src/main/res/xml/whatsapp_floating_accessibility.xml
+          cp recovered-source/app/src/main/res/values/strings.xml app/src/main/res/values/floating_import_strings.xml
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           from pathlib import Path
@@ -97,8 +118,30 @@ jobs:
               keepalive = ET.SubElement(app, "service")
               keepalive.set(android + "name", ".KeepAliveService")
           keepalive.set(android + "exported", "false")
+          floating = None
+          for item in app.findall("service"):
+              if item.get(android + "name", "") in (".WhatsAppFloatingImportService", "com.abualawi.hawalat.WhatsAppFloatingImportService"):
+                  floating = item
+                  break
+          if floating is None:
+              floating = ET.SubElement(app, "service")
+              floating.set(android + "name", ".WhatsAppFloatingImportService")
+          floating.set(android + "permission", "android.permission.BIND_ACCESSIBILITY_SERVICE")
+          floating.set(android + "exported", "true")
+          action_name = "android.accessibilityservice.AccessibilityService"
+          if not any(a.get(android + "name") == action_name for f in floating.findall("intent-filter") for a in f.findall("action")):
+              filt = ET.SubElement(floating, "intent-filter")
+              ET.SubElement(filt, "action").set(android + "name", action_name)
+          metadata = None
+          for item in floating.findall("meta-data"):
+              if item.get(android + "name") == "android.accessibilityservice":
+                  metadata = item
+          if metadata is None:
+              metadata = ET.SubElement(floating, "meta-data")
+          metadata.set(android + "name", "android.accessibilityservice")
+          metadata.set(android + "resource", "@xml/whatsapp_floating_accessibility")
           tree.write(p, encoding="utf-8", xml_declaration=True)
-          print("Notification listener and foreground keep-alive services verified")
+          print("Notification listener, keep-alive and floating accessibility services configured")
           PY
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
@@ -181,15 +224,13 @@ jobs:
       - name: Apply Abu Talal app name and launcher icon
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-noto-core
-          python3 -m pip install --user pillow
           python3 - <<'PY'
-          import os
-          import subprocess
+          import binascii
+          import struct
           import xml.etree.ElementTree as ET
+          import zlib
           from pathlib import Path
-          from PIL import Image, ImageDraw, ImageFont
+
           root = Path("app/src/main")
           manifest = root / "AndroidManifest.xml"
           android = "{http://schemas.android.com/apk/res/android}"
@@ -201,30 +242,67 @@ jobs:
           app.set(android + "label", "أبو طلال")
           app.set(android + "icon", "@mipmap/ic_launcher")
           tree.write(manifest, encoding="utf-8", xml_declaration=True)
-          font_path = subprocess.check_output(
-              ["fc-match", "Noto Sans Arabic:style=Bold", "-f", "%{file}"],
-              text=True
-          ).strip()
-          if not font_path or not Path(font_path).is_file():
-              raise SystemExit("Arabic font for launcher icon was not found")
-          for density, size in [("mdpi",48),("hdpi",72),("xhdpi",96),("xxhdpi",144),("xxxhdpi",192)]:
-              image = Image.new("RGB", (size, size), (12, 28, 48))
-              draw = ImageDraw.Draw(image)
-              scale = size / 192
-              margin = max(2, int(7 * scale))
-              draw.rounded_rectangle((margin, margin, size-margin, size-margin),
-                                     radius=int(34*scale), fill=(12,28,48),
-                                     outline=(226,184,92), width=max(1,int(4*scale)))
-              draw.ellipse((int(22*scale),int(22*scale),int(170*scale),int(170*scale)),
-                           outline=(226,184,92), width=max(1,int(2*scale)))
-              font = ImageFont.truetype(font_path, max(8,int(31*scale)))
-              draw.text((size/2,size/2), "أبو طلال", font=font, fill=(255,245,220),
-                        anchor="mm", direction="rtl", language="ar",
-                        stroke_width=max(0,int(scale)), stroke_fill=(12,28,48))
+
+          def chunk(kind, data):
+              return (struct.pack(">I", len(data)) + kind + data
+                      + struct.pack(">I", binascii.crc32(kind + data) & 0xffffffff))
+
+          def make_png(size):
+              scale = 192.0 / size
+              raw = bytearray()
+              for y in range(size):
+                  raw.append(0)
+                  for x in range(size):
+                      bx, by = x * scale, y * scale
+                      color = (12, 28, 48)
+                      if 7 <= bx <= 185 and 7 <= by <= 185 and (
+                          bx < 12 or bx > 180 or by < 12 or by > 180
+                      ):
+                          color = (226, 184, 92)
+                      # Two opposing transfer arrows, rendered without external fonts.
+                      if 42 <= by <= 50 and 52 <= bx <= 140:
+                          color = (255, 245, 220)
+                      if 42 <= by <= 74 and 132 <= bx <= 142 and bx - 132 <= by - 42:
+                          color = (255, 245, 220)
+                      if 42 <= by <= 74 and 132 <= bx <= 142 and 74 - by >= bx - 132:
+                          color = (255, 245, 220)
+                      if 112 <= by <= 120 and 52 <= bx <= 140:
+                          color = (226, 184, 92)
+                      if 88 <= by <= 120 and 50 <= bx <= 60 and by - 88 >= 60 - bx:
+                          color = (226, 184, 92)
+                      if 88 <= by <= 120 and 50 <= bx <= 60 and 120 - by >= 60 - bx:
+                          color = (226, 184, 92)
+                      raw.extend(color)
+              header = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)
+              return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+                      + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+                      + chunk(b"IEND", b""))
+
+          for density, size in [("mdpi", 48), ("hdpi", 72), ("xhdpi", 96),
+                                ("xxhdpi", 144), ("xxxhdpi", 192)]:
               out = root / "res" / ("mipmap-" + density) / "ic_launcher.png"
               out.parent.mkdir(parents=True, exist_ok=True)
-              image.save(out, format="PNG", optimize=True)
-          print("App label and Arabic launcher icon set to أبو طلال")
+              out.write_bytes(make_png(size))
+          print("App label and launcher icon generated using Python standard library only")
+          PY
+      - name: Give test build a separate install identity
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("app/build.gradle")
+          source = p.read_text(encoding="utf-8")
+          old_id = "applicationId 'com.abualawi.hawalat'"
+          new_id = "applicationId 'com.abualawi.hawalat.floating'"
+          count = source.count(old_id)
+          if count != 1:
+              raise SystemExit(f"Expected exactly one original applicationId, found {count}")
+          source = source.replace(old_id, new_id, 1)
+          if new_id not in source:
+              raise SystemExit("Separate floating applicationId was not written")
+          p.write_text(source, encoding="utf-8")
+          print("Install identity verified: com.abualawi.hawalat.floating")
           PY
 
       - name: Build automatically signed debug APK
@@ -243,11 +321,198 @@ jobs:
           APKSIGNER="$(find "$SDK/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
-          echo "APK exists, is structurally valid, and has an Android debug signature"
+          AAPT="${APKSIGNER%/apksigner}/aapt"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            EXPECTED_ID="com.abualawi.hawalat.floating"
+          else
+            EXPECTED_ID="com.abualawi.hawalat"
+          fi
+          "$AAPT" dump badging "$APK" | grep -F "package: name='$EXPECTED_ID'"
+          echo "APK exists, has a debug signature, and its application ID matches the build event"
 
       - name: Save APK
         uses: actions/upload-artifact@v4
         with:
           name: Hawalat-Abu-Alawi-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      # Build a second, isolated companion app. The original app artifact above
+      # has already been uploaded and is not replaced or modified on the device.
+      - name: Prepare standalone floating-button test app
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("app/build.gradle")
+          s = p.read_text(encoding="utf-8")
+          old_id = "applicationId 'com.abualawi.hawalat.floating'"
+          new_id = "applicationId 'com.abualawi.hawalat.floatingtest'"
+          n = s.count(old_id)
+          s = s.replace(old_id, new_id, 1)
+          if n != 1:
+              raise SystemExit("Could not assign separate package ID to floating test app")
+          p.write_text(s, encoding="utf-8")
+          m = Path("app/src/main/AndroidManifest.xml")
+          t = m.read_text(encoding="utf-8")
+          t = t.replace('android:label="حوالات أبو طلال"', 'android:label="حوالات أبو طلال - عائم"')
+          m.write_text(t, encoding="utf-8")
+          # Reuse the launcher PNGs generated by the preceding pure-Python icon step.
+          # The package ID and app label already distinguish this companion test app.
+          # Avoid a Pillow dependency so this build works on clean GitHub runners.
+          main = Path("app/src/main/java/com/abualawi/hawalat/MainActivity.java")
+          main.write_text(r'''package com.abualawi.hawalat;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.os.Environment;
+          import android.provider.Settings;
+          import android.content.Intent;
+          import android.Manifest;
+          import android.content.pm.PackageManager;
+          import android.graphics.Color;
+          import android.content.res.ColorStateList;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+          import android.view.View;
+          import android.widget.Toast;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.nio.charset.StandardCharsets;
+          import java.text.SimpleDateFormat;
+          import java.util.Date;
+          import java.util.Locale;
+          import java.util.LinkedHashMap;
+          import java.util.ArrayList;
+          import java.util.Map;
+
+          public class MainActivity extends Activity {
+              public static final Object TRANSFER_DATA_LOCK = new Object();
+              private static final int REQ_STORAGE = 42;
+
+              @Override public void onCreate(Bundle state) {
+                  super.onCreate(state);
+                  LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setPadding(28, 36, 28, 28);
+                  box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                  box.setBackgroundColor(Color.rgb(10, 25, 43));
+                  TextView title = new TextView(this);
+                  title.setText("حوالات أبو طلال");
+                  title.setTextColor(Color.rgb(242, 198, 105));
+                  title.setTextSize(24);
+                  box.addView(title);
+                  TextView info = new TextView(this);
+                  info.setText("هذا تطبيق تجريبي مستقل. فعّل خدمة إمكانية الوصول، ثم افتح مجموعة العمقي أو بن دول في واتساب. سيظهر زر عائم. التصدير هنا منفصل عن ملفات التطبيق الأساسي.");
+                  info.setTextSize(16);
+                  info.setTextColor(Color.rgb(226, 237, 245));
+                  info.setPadding(0, 18, 0, 18);
+                  box.addView(info);
+                  Button enable = new Button(this);
+                  enable.setText("تفعيل الزر العائم");
+                  enable.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(0, 145, 145)));
+                  enable.setTextColor(Color.WHITE);
+                  box.addView(enable);
+                  enable.setOnClickListener(v -> {
+                      startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                      Toast.makeText(this, "اختر خدمة «زر الحوالات العائم - تجربة» وفعّلها", Toast.LENGTH_LONG).show();
+                  });
+                  Button export = new Button(this);
+                  export.setText("تصدير الحوالات إلى Excel");
+                  export.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(190, 145, 55)));
+                  export.setTextColor(Color.rgb(10, 25, 43));
+                  box.addView(export);
+                  export.setOnClickListener(v -> exportCsv());
+                  setContentView(box);
+                  if (android.os.Build.VERSION.SDK_INT >= 23 &&
+                      checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                      requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+                  }
+              }
+
+              private String csv(String value) {
+                  String x = value == null ? "" : value;
+                  return "\"" + x.replace("\"", "\"\"") + "\"";
+              }
+
+              private void exportCsv() {
+                  if (android.os.Build.VERSION.SDK_INT >= 23 &&
+                      checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                      requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+                      Toast.makeText(this, "اسمح بصلاحية الملفات ثم اضغط التصدير مرة أخرى", Toast.LENGTH_LONG).show();
+                      return;
+                  }
+                  try {
+                      File folder = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                              "أبو طلال - تجربة الزر العائم");
+                      if (!folder.exists() && !folder.mkdirs()) throw new Exception("تعذر إنشاء مجلد التصدير");
+                      String[] keys = {"rows_العمقي", "rows_بن دول » محمد علوي احمد"};
+                      String[] names = {"العمقي", "بن دول"};
+                      android.content.SharedPreferences prefs = getSharedPreferences("hawalat", MODE_PRIVATE);
+                      int total = 0;
+                      for (int g = 0; g < keys.length; g++) {
+                          String data;
+                          synchronized (TRANSFER_DATA_LOCK) { data = prefs.getString(keys[g], ""); }
+                          Map<String, ArrayList<String[]>> byDate = new LinkedHashMap<>();
+                          for (String line : data.split("\\n")) {
+                              String[] p = line.split("\\t", -1);
+                              if (p.length >= 4) {
+                                  ArrayList<String[]> rows = byDate.get(p[0]);
+                                  if (rows == null) { rows = new ArrayList<>(); byDate.put(p[0], rows); }
+                                  rows.add(p);
+                              }
+                          }
+                          for (Map.Entry<String, ArrayList<String[]>> entry : byDate.entrySet()) {
+                              StringBuilder out = new StringBuilder("\uFEFF");
+                              out.append("اسم المستلم,المبلغ,التاريخ,الوقت\r\n");
+                              for (String[] p : entry.getValue()) {
+                                  out.append(csv(p[2])).append(',')
+                                     .append(csv(p[3])).append(',')
+                                     .append(csv(p[0])).append(',')
+                                     .append(csv(p[1])).append("\r\n");
+                              }
+                              File file = new File(folder, names[g] + "-" + entry.getKey() + ".csv");
+                              try (FileOutputStream stream = new FileOutputStream(file, false)) {
+                                  stream.write(out.toString().getBytes(StandardCharsets.UTF_8));
+                                  stream.flush();
+                                  stream.getFD().sync();
+                              }
+                              total += entry.getValue().size();
+                          }
+                      }
+                      Toast.makeText(this, "تم تصدير " + total + " سجل إلى مجلد التنزيلات: أبو طلال - تجربة الزر العائم", Toast.LENGTH_LONG).show();
+                  } catch (Exception e) {
+                      Toast.makeText(this, "تعذر التصدير: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+          }
+          ''', encoding="utf-8")
+          print("Standalone companion app prepared; separate package and separate CSV export folder.")
+          PY
+
+      - name: Build standalone floating-button test APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify standalone floating test APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          test "$(stat -c%s "$APK")" -gt 10000
+          unzip -t "$APK"
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          APKSIGNER="$(find "$SDK/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          "$SDK/build-tools/$(basename "$(dirname "$APKSIGNER")")/aapt" dump badging "$APK" | grep -F "package: name='com.abualawi.hawalat.floatingtest'"
+          echo "Separate floating test APK verified."
+
+      - name: Save standalone floating-button test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Abu-Talal-Floating-Test
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
