@@ -36,6 +36,15 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Test seven Al-Amqi regression messages
+        run: python3 tests/test_transfer_patterns.py
+
+      - name: Test daily XLSX export and archive-safety contract
+        run: python3 tests/test_xlsx_export_contract.py
+
+      - name: Run production XLSX writer round-trip on JVM
+        run: python3 tests/test_xlsx_export_runtime.py
+
       - name: Test floating WhatsApp import parser and repeat scans
         run: python3 tests/test_floating_import_parser.py
 
