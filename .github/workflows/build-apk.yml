@@ -275,7 +275,8 @@ jobs:
               out.parent.mkdir(parents=True, exist_ok=True)
               out.write_bytes(make_png(size))
           print("App label and launcher icon generated using Python standard library only")
-          PY      - name: Give test build a separate install identity
+          PY
+      - name: Give test build a separate install identity
         shell: bash
         run: |
           python3 - <<'PY'
