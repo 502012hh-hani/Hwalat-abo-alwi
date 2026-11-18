@@ -256,6 +256,21 @@ jobs:
           print("App label and Arabic launcher icon set to أبو طلال")
           PY
 
+      - name: Give test build a separate install identity
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          p = Path("app/build.gradle")
+          s = p.read_text(encoding="utf-8")
+          updated, count = re.subn(r"applicationId\\s+['\\\"]com\\.abualawi\\.hawalat['\\\"]", "applicationId 'com.abualawi.hawalat.test'", s, count=1)
+          if count != 1:
+              raise SystemExit("Could not safely set the separate test applicationId")
+          p.write_text(updated, encoding="utf-8")
+          print("Test APK package: com.abualawi.hawalat.test (keeps the installed app untouched)")
+          PY
+
       - name: Build automatically signed debug APK
         run: gradle --no-daemon :app:assembleDebug
 
