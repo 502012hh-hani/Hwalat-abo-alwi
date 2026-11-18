@@ -31,6 +31,9 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
     private TextView button;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean busy = false;
+    private String lastDetectedGroup = "";
+    private long lastScanStartedAt = 0L;
+    private static final int MAX_SCAN_PAGES = 100;
 
     @Override public void onServiceConnected() {
         super.onServiceConnected();
@@ -59,7 +62,11 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
         bg.setColor(Color.rgb(15, 76, 110));
         bg.setCornerRadius(48);
         button.setBackground(bg);
-        button.setOnClickListener(v -> importVisibleChat());
+        button.setOnClickListener(v -> {
+            String group = detectOpenGroup();
+            if (group.isEmpty()) Toast.makeText(this, "افتح مجموعة العمقي أو بن دول أولاً", Toast.LENGTH_SHORT).show();
+            else startFullDayScan(group, true);
+        });
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -73,35 +80,115 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
         catch (Exception e) { button = null; }
     }
 
-    private void importVisibleChat() {
+    private String detectOpenGroup() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return "";
+        String pkg = String.valueOf(root.getPackageName());
+        if (!"com.whatsapp".equals(pkg) && !"com.whatsapp.w4b".equals(pkg)) return "";
+        StringBuilder text = new StringBuilder();
+        collectText(root, text, 0);
+        String s = text.toString();
+        if (s.contains("العمقي") || s.contains("العمقى")) return "العمقي";
+        if (s.contains("بن دول") || s.contains("محمد علوي احمد")) return "بن دول » محمد علوي احمد";
+        return "";
+    }
+
+    private void startFullDayScan(String group, boolean manual) {
         if (busy) return;
-        String pkg = getRootInActiveWindow() == null ? "" :
-                String.valueOf(getRootInActiveWindow().getPackageName());
-        if (!"com.whatsapp".equals(pkg) && !"com.whatsapp.w4b".equals(pkg)) {
-            Toast.makeText(this, "افتح مجموعة واتساب أولاً", Toast.LENGTH_SHORT).show();
+        long now = System.currentTimeMillis();
+        if (!manual && now - lastScanStartedAt < 12000L) return;
+        busy = true;
+        lastScanStartedAt = now;
+        if (button != null) button.setText("⏳ جارٍ فحص رسائل اليوم");
+        Toast.makeText(this, "بدأ فحص رسائل اليوم في " + group, Toast.LENGTH_SHORT).show();
+        ArrayList<String> pages = new ArrayList<>();
+        scanOlderPages(group, pages, 0);
+    }
+
+    private void scanOlderPages(String group, ArrayList<String> pages, int page) {
+        if (page >= MAX_SCAN_PAGES) {
+            finishScan(group, pages, "توقف حد الأمان بعد " + MAX_SCAN_PAGES + " شاشة");
             return;
         }
         AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) {
-            Toast.makeText(this, "تعذر قراءة شاشة واتساب الحالية", Toast.LENGTH_SHORT).show();
+        if (root == null) { finishScan(group, pages, "تعذر الوصول إلى شاشة واتساب"); return; }
+        StringBuilder visible = new StringBuilder();
+        collectText(root, visible, 0);
+        String pageText = visible.toString();
+        if (!pageText.trim().isEmpty()) pages.add(pageText);
+
+        // WhatsApp's date divider is used as the stopping boundary. We keep
+        // the page containing the divider so the final parser can exclude older content.
+        if (containsYesterdayOrOlderDivider(pageText)) {
+            finishScan(group, pages, "تم الوصول إلى فاصل ما قبل اليوم");
             return;
         }
-        StringBuilder text = new StringBuilder();
-        collectText(root, text, 0);
-        String screen = text.toString();
-        String group = screen.contains("العمقي") || screen.contains("العمقى") ? "العمقي" :
-                (screen.contains("بن دول") || screen.contains("محمد علوي احمد")
-                        ? "بن دول » محمد علوي احمد" : "");
-        if (group.isEmpty()) {
-            Toast.makeText(this, "لم أتعرف على المجموعة. افتح العمقي أو بن دول", Toast.LENGTH_LONG).show();
-            return;
-        }
-        busy = true;
-        int imported = parseAndSave(screen, group);
-        busy = false;
-        Toast.makeText(this, "تم فحص النص الظاهر: " + imported
-                + " حوالة مضافة. هذه قراءة للمحتوى المحمّل والظاهر فقط؛ راجع بقية رسائل اليوم بالتمرير.", Toast.LENGTH_LONG).show();
+        AccessibilityNodeInfo scrollable = findScrollable(root, 0);
+        boolean moved = scrollable != null && scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
+        if (scrollable != null) scrollable.recycle();
+        root.recycle();
+        if (!moved) { finishScan(group, pages, "وصلنا إلى أقدم محتوى يستطيع واتساب عرضه"); return; }
+        handler.postDelayed(() -> scanOlderPages(group, pages, page + 1), 550);
     }
+
+    private boolean containsYesterdayOrOlderDivider(String s) {
+        String x = s.toLowerCase(Locale.ROOT);
+        return x.contains("أمس") || x.contains("امس") || x.contains("yesterday");
+    }
+
+    private AccessibilityNodeInfo findScrollable(AccessibilityNodeInfo node, int depth) {
+        if (node == null || depth > 40) return null;
+        if (node.isScrollable()) return AccessibilityNodeInfo.obtain(node);
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                AccessibilityNodeInfo found = findScrollable(child, depth + 1);
+                child.recycle();
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private void finishScan(String group, ArrayList<String> pages, String reason) {
+        StringBuilder all = new StringBuilder();
+        for (int i = pages.size() - 1; i >= 0; i--) all.append(pages.get(i)).append("\\n");
+        // The parser stores only records it can identify; raw pages are retained
+        // for review instead of silently discarding text it cannot parse.
+        int added = parseAndSave(all.toString(), group);
+        String date = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
+        getSharedPreferences("hawalat", MODE_PRIVATE).edit()
+                .putString("last_scan_raw_" + (group.equals("العمقي") ? "amqi" : "bindol"), all.toString())
+                .putString("last_scan_report", "المجموعة: " + group + "؛ التاريخ: " + date
+                        + "؛ الشاشات المقروءة: " + pages.size() + "؛ السجلات المضافة: " + added
+                        + "؛ النتيجة: " + reason).commit();
+        busy = false;
+        if (button != null) button.setText("📥 إعادة استيراد حوالات اليوم");
+        Toast.makeText(this, "انتهى الفحص: " + pages.size() + " شاشة، أضيف " + added
+                + " سجل. " + reason + ". راجع السجلات غير المحللة قبل اعتماد التقرير.", Toast.LENGTH_LONG).show();
+    }
+
+    @Override public void onAccessibilityEvent(AccessibilityEvent event) {
+        if (event == null) return;
+        String pkg = event.getPackageName() == null ? "" : event.getPackageName().toString();
+        if (!"com.whatsapp".equals(pkg) && !"com.whatsapp.w4b".equals(pkg)) {
+            lastDetectedGroup = "";
+            return;
+        }
+        if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                && event.getEventType() != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return;
+        handler.removeCallbacks(autoOpenCheck);
+        handler.postDelayed(autoOpenCheck, 900);
+    }
+
+    private final Runnable autoOpenCheck = () -> {
+        String group = detectOpenGroup();
+        if (group.isEmpty()) { lastDetectedGroup = ""; return; }
+        if (!group.equals(lastDetectedGroup)) {
+            lastDetectedGroup = group;
+            startFullDayScan(group, false);
+        }
+    };
 
     private void collectText(AccessibilityNodeInfo node, StringBuilder out, int depth) {
         if (node == null || depth > 45) return;
