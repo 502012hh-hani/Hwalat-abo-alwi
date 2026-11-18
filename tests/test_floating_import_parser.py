@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory(prefix="floating-import-test-") as temp:
         check=True,
     )
     subprocess.run(
-        ["java", "-cp", str(temp_path), "FloatingImportParserTest"],
+        ["java", "-cp", str(temp_path), "com.abualawi.hawalat.FloatingImportParserTest"],
         check=True,
     )
 
