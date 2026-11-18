@@ -19,9 +19,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.Locale;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Floating import entry point. It reads only text exposed by WhatsApp's
@@ -234,47 +232,23 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
         String key = group.equals("العمقي") ? "rows_العمقي" : "rows_بن دول » محمد علوي احمد";
         synchronized (MainActivity.TRANSFER_DATA_LOCK) {
             String old = prefs.getString(key, "");
-            Map<String, Integer> storedCounts = new HashMap<>();
-            if (!old.isEmpty()) {
-                for (String line : old.split("\\n")) {
-                    String[] p = line.split("\\t", -1);
-                    if (p.length >= 4) {
-                        String fingerprint = FloatingImportParser.fingerprint(p[0], p[1], p[2], p[3]);
-                        Integer count = storedCounts.get(fingerprint);
-                        storedCounts.put(fingerprint, count == null ? 1 : count + 1);
-                    }
-                }
+            List<FloatingImportParser.Transfer> additions =
+                    FloatingImportParser.onlyNewOccurrences(transfers, old, date);
+            StringBuilder newRows = new StringBuilder();
+            for (FloatingImportParser.Transfer transfer : additions) {
+                if (newRows.length() > 0) newRows.append('\\n');
+                newRows.append(date).append('\\t').append(transfer.time).append('\\t')
+                        .append(transfer.name).append('\\t').append(transfer.amount);
             }
-
-            Map<String, Integer> scanCounts = new HashMap<>();
-            StringBuilder additions = new StringBuilder();
-            int added = 0;
-            for (FloatingImportParser.Transfer transfer : transfers) {
-                String fingerprint = FloatingImportParser.fingerprint(
-                        date, transfer.time, transfer.name, transfer.amount);
-                Integer seen = scanCounts.get(fingerprint);
-                int occurrence = (seen == null ? 0 : seen) + 1;
-                scanCounts.put(fingerprint, occurrence);
-                Integer stored = storedCounts.get(fingerprint);
-                int alreadyStored = stored == null ? 0 : stored;
-                // Count occurrences rather than unique names: legitimate repeated
-                // transfers remain separate, while a rescan is idempotent.
-                if (occurrence <= alreadyStored) continue;
-                String row = date + "\\t" + transfer.time + "\\t" + transfer.name + "\\t" + transfer.amount;
-                if (additions.length() > 0) additions.append('\n');
-                additions.append(row);
-                storedCounts.put(fingerprint, occurrence);
-                added++;
-            }
-
-            String next = additions.length() == 0 ? old
-                    : additions.toString() + (old.isEmpty() ? "" : "\\n" + old);
+            String next = newRows.length() == 0 ? old
+                    : newRows.toString() + (old.isEmpty() ? "" : "\\n" + old);
             prefs.edit().putString(key, next)
                     .putString("last_floating_import", "فحص " + date + " في " + group
                             + "؛ رسائل قابلة للتحليل: " + transfers.size()
-                            + "؛ سجلات جديدة: " + added + "؛ التكرارات الموجودة لم تُضف مرة أخرى.")
+                            + "؛ سجلات جديدة: " + additions.size()
+                            + "؛ التكرارات الموجودة لم تُضف مرة أخرى.")
                     .commit();
-            return added;
+            return additions.size();
         }
     }
 
