@@ -244,7 +244,6 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
         }
     }
 
-    @Override public void onAccessibilityEvent(AccessibilityEvent event) { }
     @Override public void onInterrupt() { }
     @Override public void onDestroy() {
         if (button != null && windowManager != null) {
