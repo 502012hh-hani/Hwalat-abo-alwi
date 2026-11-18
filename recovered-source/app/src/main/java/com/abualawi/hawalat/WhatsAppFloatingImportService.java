@@ -237,8 +237,8 @@ public class WhatsAppFloatingImportService extends AccessibilityService {
             StringBuilder newRows = new StringBuilder();
             for (FloatingImportParser.Transfer transfer : additions) {
                 if (newRows.length() > 0) newRows.append('\n');
-                newRows.append(date).append('\t').append(transfer.time).append('\\t')
-                        .append(transfer.name).append('\\t').append(transfer.amount);
+                newRows.append(date).append('\t').append(transfer.time).append('\t')
+                        .append(transfer.name).append('\t').append(transfer.amount);
             }
             String next = newRows.length() == 0 ? old
                     : newRows.toString() + (old.isEmpty() ? "" : "\n" + old);
