@@ -227,7 +227,7 @@ jobs:
           app = tree.getroot().find("application")
           if app is None:
               raise SystemExit("Manifest application element is missing")
-          app.set(android + "label", "أبو طلال")
+          app.set(android + "label", "حوالات أبو طلال")
           app.set(android + "icon", "@mipmap/ic_launcher")
           tree.write(manifest, encoding="utf-8", xml_declaration=True)
           font_path = subprocess.check_output(
@@ -247,7 +247,7 @@ jobs:
               draw.ellipse((int(22*scale),int(22*scale),int(170*scale),int(170*scale)),
                            outline=(226,184,92), width=max(1,int(2*scale)))
               font = ImageFont.truetype(font_path, max(8,int(31*scale)))
-              draw.text((size/2,size/2), "أبو طلال", font=font, fill=(255,245,220),
+              draw.text((size/2,size/2), "حوالات", font=font, fill=(255,245,220),
                         anchor="mm", direction="rtl", language="ar",
                         stroke_width=max(0,int(scale)), stroke_fill=(12,28,48))
               out = root / "res" / ("mipmap-" + density) / "ic_launcher.png"
@@ -311,7 +311,7 @@ jobs:
           import re
           p = Path("app/build.gradle")
           s = p.read_text(encoding="utf-8")
-          old_id = "applicationId 'com.abualawi.hawalat'"
+          old_id = "applicationId 'com.abualawi.hawalat.floating'"
           new_id = "applicationId 'com.abualawi.hawalat.floatingtest'"
           n = s.count(old_id)
           s = s.replace(old_id, new_id, 1)
@@ -320,8 +320,24 @@ jobs:
           p.write_text(s, encoding="utf-8")
           m = Path("app/src/main/AndroidManifest.xml")
           t = m.read_text(encoding="utf-8")
-          t = t.replace('android:label="أبو طلال"', 'android:label="زر الحوالات العائم - تجربة"')
+          t = t.replace('android:label="حوالات أبو طلال"', 'android:label="حوالات أبو طلال - عائم"')
           m.write_text(t, encoding="utf-8")
+          # Distinct teal-and-gold launcher icon for the floating companion app.
+          import subprocess
+          from PIL import Image, ImageDraw, ImageFont
+          font_path = subprocess.check_output(["fc-match", "Noto Sans Arabic:style=Bold", "-f", "%{file}"], text=True).strip()
+          for density, size in [("mdpi",48),("hdpi",72),("xhdpi",96),("xxhdpi",144),("xxxhdpi",192)]:
+              scale = size / 192
+              icon = Image.new("RGB", (size,size), (10,25,43))
+              draw = ImageDraw.Draw(icon)
+              margin = max(2,int(7*scale))
+              draw.rounded_rectangle((margin,margin,size-margin,size-margin),radius=int(36*scale),fill=(0,74,78),outline=(242,198,105),width=max(1,int(5*scale)))
+              draw.ellipse((int(20*scale),int(20*scale),int(172*scale),int(172*scale)),outline=(242,198,105),width=max(1,int(3*scale)))
+              font = ImageFont.truetype(font_path,max(8,int(38*scale)))
+              draw.text((size/2,size/2),"حوالات",font=font,fill=(255,248,226),anchor="mm",direction="rtl",language="ar")
+              out = Path("app/src/main/res") / ("mipmap-"+density) / "ic_launcher.png"
+              out.parent.mkdir(parents=True,exist_ok=True)
+              icon.save(out,format="PNG",optimize=True)
           main = Path("app/src/main/java/com/abualawi/hawalat/MainActivity.java")
           main.write_text(r'''package com.abualawi.hawalat;
 
@@ -332,6 +348,8 @@ jobs:
           import android.content.Intent;
           import android.Manifest;
           import android.content.pm.PackageManager;
+          import android.graphics.Color;
+          import android.content.res.ColorStateList;
           import android.widget.Button;
           import android.widget.LinearLayout;
           import android.widget.TextView;
@@ -357,24 +375,31 @@ jobs:
                   box.setOrientation(LinearLayout.VERTICAL);
                   box.setPadding(28, 36, 28, 28);
                   box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                  box.setBackgroundColor(Color.rgb(10, 25, 43));
                   TextView title = new TextView(this);
-                  title.setText("تجربة الزر العائم فقط");
+                  title.setText("حوالات أبو طلال");
+                  title.setTextColor(Color.rgb(242, 198, 105));
                   title.setTextSize(24);
                   box.addView(title);
                   TextView info = new TextView(this);
                   info.setText("هذا تطبيق تجريبي مستقل. فعّل خدمة إمكانية الوصول، ثم افتح مجموعة العمقي أو بن دول في واتساب. سيظهر زر عائم. التصدير هنا منفصل عن ملفات التطبيق الأساسي.");
                   info.setTextSize(16);
+                  info.setTextColor(Color.rgb(226, 237, 245));
                   info.setPadding(0, 18, 0, 18);
                   box.addView(info);
                   Button enable = new Button(this);
                   enable.setText("تفعيل الزر العائم");
+                  enable.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(0, 145, 145)));
+                  enable.setTextColor(Color.WHITE);
                   box.addView(enable);
                   enable.setOnClickListener(v -> {
                       startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
                       Toast.makeText(this, "اختر خدمة «زر الحوالات العائم - تجربة» وفعّلها", Toast.LENGTH_LONG).show();
                   });
                   Button export = new Button(this);
-                  export.setText("تصدير سجلات التجربة إلى Excel");
+                  export.setText("تصدير الحوالات إلى Excel");
+                  export.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(190, 145, 55)));
+                  export.setTextColor(Color.rgb(10, 25, 43));
                   box.addView(export);
                   export.setOnClickListener(v -> exportCsv());
                   setContentView(box);
