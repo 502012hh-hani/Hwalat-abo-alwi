@@ -276,7 +276,8 @@ jobs:
               out.parent.mkdir(parents=True, exist_ok=True)
               out.write_bytes(make_png(size))
           print("App label and launcher icon generated using Python standard library only")
-          PY      - name: Build debug APK for validation only
+          PY
+      - name: Build debug APK for validation only
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Verify APK package, Android compatibility, and debug signature
