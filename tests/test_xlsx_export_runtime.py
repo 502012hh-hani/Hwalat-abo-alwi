@@ -76,6 +76,7 @@ signatures = [
     "private String normalizeDuplicateAmount(",
     "private void appendXlsxRow(",
     "private String xmlEscape(",
+    "private void restoreWorkbookBackup(File target, File backup)",
     "private void putZipText(",
 ]
 methods = "\n\n".join(extract_method(x) for x in signatures)
@@ -105,6 +106,25 @@ __METHODS__
         }
         probe.validateXlsx(output, rows);
         System.out.println("PASS: production Java XLSX writer and validator round-trip " + rows.size() + " rows");
+
+        // Reproduce a crash after target -> .bak but before .tmp -> target.
+        File recoveryDir = new File(args[1]);
+        if (!recoveryDir.mkdirs() && !recoveryDir.isDirectory()) {
+            throw new IOException("Could not create recovery test directory");
+        }
+        File missingTarget = new File(recoveryDir, "العمقي-2026-11-19.xlsx");
+        File interruptedBackup = new File(recoveryDir, "العمقي-2026-11-19.xlsx.bak");
+        try (FileOutputStream backupOut = new FileOutputStream(interruptedBackup)) {
+            backupOut.write("last-known-good-workbook".getBytes(StandardCharsets.UTF_8));
+            backupOut.getFD().sync();
+        }
+        probe.restoreWorkbookBackup(missingTarget, interruptedBackup);
+        String restored = new String(java.nio.file.Files.readAllBytes(missingTarget.toPath()),
+                StandardCharsets.UTF_8);
+        if (!"last-known-good-workbook".equals(restored) || interruptedBackup.exists()) {
+            throw new AssertionError("Interrupted export backup was not restored");
+        }
+        System.out.println("PASS: missing target + surviving .bak restores the last known workbook");
     }
 }
 '''.replace("__METHODS__", methods)
@@ -115,7 +135,7 @@ with tempfile.TemporaryDirectory(prefix="hawalat-xlsx-") as tmp:
     output = root / "probe.xlsx"
     java_file.write_text(harness, encoding="utf-8")
     subprocess.run(["javac", "-encoding", "UTF-8", str(java_file)], check=True)
-    subprocess.run(["java", "-cp", str(root), "XlsxRuntimeProbe", str(output)], check=True)
+    subprocess.run(["java", "-cp", str(root), "XlsxRuntimeProbe", str(output), str(root / "recovery")], check=True)
 
     with zipfile.ZipFile(output) as workbook:
         assert workbook.testzip() is None, "XLSX ZIP CRC check failed"
@@ -168,6 +188,7 @@ with tempfile.TemporaryDirectory(prefix="hawalat-xlsx-") as tmp:
             "Yellow duplicate fill is missing from styles.xml"
         )
 
+print("PASS: interrupted replacement recovery preserves the previous workbook")
 print("PASS: generated XLSX ZIP and OOXML parts are valid")
 print("PASS: Arabic text, XML escaping, numeric/text amounts, and all four columns round-trip")
 print("PASS: later duplicate row is yellow; first occurrence remains normal")
