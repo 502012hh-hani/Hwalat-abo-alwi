@@ -422,7 +422,10 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
                 out.getFD().sync();
             }
             validateXlsx(temp, rows);
-            if (backup.exists() && !backup.delete()) {
+            // If target is missing, a .bak may be the only surviving good workbook
+            // from a previous interrupted replacement. Keep it until the new target
+            // has been installed and fully validated.
+            if (hadTarget && backup.exists() && !backup.delete()) {
                 throw new Exception("تعذر حذف النسخة الاحتياطية السابقة: " + backup.getName());
             }
             if (hadTarget && !target.renameTo(backup)) {
@@ -446,19 +449,33 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
             return rows.size();
         } catch (Exception ex) {
             if (temp.exists()) temp.delete();
-            if (hadTarget && backup.exists()) {
-                if (target.exists() && !target.delete()) {
-                    android.util.Log.e("HawalatExport", "Could not remove invalid replacement: "
-                            + target.getAbsolutePath());
-                }
-                if (!target.exists() && !backup.renameTo(target)) {
+            if (backup.exists()) {
+                try {
+                    // Also recover backups left by a previous run that crashed after
+                    // renaming target -> .bak while target was absent at this run's start.
+                    restoreWorkbookBackup(target, backup);
+                } catch (Exception restoreError) {
                     android.util.Log.e("HawalatExport", "Could not restore previous workbook from: "
-                            + backup.getAbsolutePath());
+                            + backup.getAbsolutePath(), restoreError);
                 }
             } else if (!hadTarget && target.exists()) {
                 target.delete();
             }
             throw ex;
+        }
+    }
+
+    // Restore the last known workbook after an interrupted replacement.
+    // Kept Android-independent so the exact recovery behavior can run in JVM tests.
+    private void restoreWorkbookBackup(File target, File backup) throws Exception {
+        if (backup == null || !backup.isFile()) {
+            throw new Exception("النسخة الاحتياطية غير موجودة");
+        }
+        if (target.exists() && !target.delete()) {
+            throw new Exception("تعذر حذف ملف Excel غير الصالح قبل الاستعادة");
+        }
+        if (!backup.renameTo(target)) {
+            throw new Exception("تعذر استعادة ملف Excel السابق");
         }
     }
 
