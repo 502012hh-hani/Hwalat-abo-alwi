@@ -45,6 +45,13 @@ assert "buildXlsxBytes(rows)" in write
 assert 'new FileOutputStream(temp, false)' in write
 assert "validateXlsx(temp, rows)" in write
 assert "validateXlsx(target, rows)" in write
+# A backup from an earlier crash must survive when the target is absent at retry.
+assert "if (hadTarget && backup.exists() && !backup.delete())" in write
+assert "if (backup.exists())" in write
+assert "restoreWorkbookBackup(target, backup)" in write
+assert "if (hadTarget && backup.exists())" not in write
+assert "private void restoreWorkbookBackup(File target, File backup)" in MAIN
+
 
 # The validator must compare the actual four-column worksheet contents to the store.
 for required_part in (
