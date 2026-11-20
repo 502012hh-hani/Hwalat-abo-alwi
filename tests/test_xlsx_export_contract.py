@@ -121,7 +121,8 @@ assert "synchronized (MainActivity.TRANSFER_DATA_LOCK)" in process_once
 assert "processedMessageDigest(signature)" in process_once
 assert '"processed_message_digests_v2"' in process_once
 assert "rememberProcessedMessageDigest(stored, digest)" in process_once
-assert "Integer.toHexString(signature.hashCode())" not in process_once
+assert 'String legacyKey = "processed_message_" + Integer.toHexString(signature.hashCode())' in process_once
+assert "legacyDuplicate = signature.equals(prefs.getString(legacyKey, null))" in process_once
 assert "values.size() > 2048" in LISTENER
 assert "private String processedMessageDigest(" in LISTENER
 assert "private boolean hasProcessedMessageDigest(" in LISTENER
