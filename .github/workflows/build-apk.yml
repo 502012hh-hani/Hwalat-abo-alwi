@@ -34,6 +34,13 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Run transfer, XLSX, and notification dedup regression tests
+        run: |
+          python3 tests/test_transfer_patterns.py
+          python3 tests/test_xlsx_export_contract.py
+          python3 tests/test_xlsx_export_runtime.py
+          python3 tests/test_notification_dedup_runtime.py
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
