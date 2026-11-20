@@ -37,6 +37,9 @@ jobs:
       - name: Run production XLSX writer round-trip on JVM
         run: python3 tests/test_xlsx_export_runtime.py
 
+      - name: Run production notification dedup regression on JVM
+        run: python3 tests/test_notification_dedup_runtime.py
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
