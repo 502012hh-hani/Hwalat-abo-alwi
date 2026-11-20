@@ -115,6 +115,18 @@ assert "getStoredDatesFromData(snapshots[i])" in export
 assert "writeGroupToDownloads(labels[i], keys[i], date, snapshots[i])" in export
 assert "Download/أبو علوي" in export
 
+# Reposted notification dedup uses a collision-resistant digest and bounded cache.
+process_once = method(LISTENER, "private void processMessageOnce(")
+assert "synchronized (MainActivity.TRANSFER_DATA_LOCK)" in process_once
+assert "processedMessageDigest(signature)" in process_once
+assert '"processed_message_digests_v2"' in process_once
+assert "rememberProcessedMessageDigest(stored, digest)" in process_once
+assert "Integer.toHexString(signature.hashCode())" not in process_once
+assert "values.size() > 2048" in LISTENER
+assert "private String processedMessageDigest(" in LISTENER
+assert "private boolean hasProcessedMessageDigest(" in LISTENER
+assert "private String rememberProcessedMessageDigest(" in LISTENER
+
 print("PASS: daily per-group/date XLSX snapshot contract")
 print("PASS: exported worksheet is checked against every stored cell")
 print("PASS: archived rows are pruned only after exact archive validation")
