@@ -311,16 +311,76 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         return s.trim();
     }
 
+    // Use SHA-256 rather than String.hashCode(), whose 32-bit collisions can
+    // allow two different WhatsApp messages to overwrite each other's dedup entry.
+    private String processedMessageDigest(String signature) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(signature.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            final char[] hex = "0123456789abcdef".toCharArray();
+            char[] output = new char[digest.length * 2];
+            for (int i = 0; i < digest.length; i++) {
+                int value = digest[i] & 0xff;
+                output[i * 2] = hex[value >>> 4];
+                output[i * 2 + 1] = hex[value & 0x0f];
+            }
+            return new String(output);
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable on this Android device", impossible);
+        }
+    }
+
+    private boolean hasProcessedMessageDigest(String stored, String digest) {
+        if (stored == null || stored.isEmpty()) return false;
+        for (String item : stored.split("\\n")) {
+            if (digest.equals(item)) return true;
+        }
+        return false;
+    }
+
+    // Keep a bounded insertion-ordered cache in one preference value. This avoids
+    // creating one permanent SharedPreferences key for every WhatsApp message.
+    private String rememberProcessedMessageDigest(String stored, String digest) {
+        java.util.LinkedHashSet<String> values = new java.util.LinkedHashSet<>();
+        if (stored != null && !stored.isEmpty()) {
+            for (String item : stored.split("\\n")) {
+                if (!item.isEmpty()) values.add(item);
+            }
+        }
+        values.remove(digest);
+        values.add(digest);
+        while (values.size() > 2048) {
+            java.util.Iterator<String> iterator = values.iterator();
+            iterator.next();
+            iterator.remove();
+        }
+        StringBuilder result = new StringBuilder();
+        for (String item : values) {
+            if (result.length() > 0) result.append("\\n");
+            result.append(item);
+        }
+        return result.toString();
+    }
+
     // Prevent the same WhatsApp MessagingStyle history item from being saved again
     // when WhatsApp reposts an updated notification containing older messages.
     private void processMessageOnce(String body, String group, long posted) {
         String signature = group + "|" + posted + "|" + (body == null ? "" : body.trim());
-        String key = "processed_message_" + Integer.toHexString(signature.hashCode());
-        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        String previous = prefs.getString(key, "");
-        if (signature.equals(previous)) return;
-        prefs.edit().putString(key, signature).apply();
-        processMessage(body, group, posted);
+        String digest = processedMessageDigest(signature);
+        boolean legacyDuplicate;
+        synchronized (MainActivity.TRANSFER_DATA_LOCK) {
+            android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+            String stored = prefs.getString("processed_message_digests_v2", "");
+            if (hasProcessedMessageDigest(stored, digest)) return;
+
+            // Retire the old 32-bit entry when upgrading an already-seen message.
+            String legacyKey = "processed_message_" + Integer.toHexString(signature.hashCode());
+            legacyDuplicate = signature.equals(prefs.getString(legacyKey, null));
+            String updated = rememberProcessedMessageDigest(stored, digest);
+            prefs.edit().putString("processed_message_digests_v2", updated)
+                    .remove(legacyKey).apply();
+        }
+        if (!legacyDuplicate) processMessage(body, group, posted);
     }
 
     private void processMessage(String body, String group, long posted) {
