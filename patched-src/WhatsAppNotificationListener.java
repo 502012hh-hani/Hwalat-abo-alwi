@@ -356,7 +356,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         }
         StringBuilder result = new StringBuilder();
         for (String item : values) {
-            if (result.length() > 0) result.append("\\n");
+            if (result.length() > 0) result.append("\n");
             result.append(item);
         }
         return result.toString();
