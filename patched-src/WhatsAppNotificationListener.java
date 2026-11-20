@@ -367,7 +367,6 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
     private void processMessageOnce(String body, String group, long posted) {
         String signature = group + "|" + posted + "|" + (body == null ? "" : body.trim());
         String digest = processedMessageDigest(signature);
-        boolean legacyDuplicate;
         synchronized (MainActivity.TRANSFER_DATA_LOCK) {
             android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
             String stored = prefs.getString("processed_message_digests_v2", "");
@@ -375,12 +374,16 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
             // Retire the old 32-bit entry when upgrading an already-seen message.
             String legacyKey = "processed_message_" + Integer.toHexString(signature.hashCode());
-            legacyDuplicate = signature.equals(prefs.getString(legacyKey, null));
+            boolean legacyDuplicate = signature.equals(prefs.getString(legacyKey, null));
+            // Process the transfer before recording its dedup marker. If processing
+            // fails or the process is interrupted, the message remains eligible for retry
+            // instead of being marked seen while its transfer row was never stored.
+            if (!legacyDuplicate) processMessage(body, group, posted);
+
             String updated = rememberProcessedMessageDigest(stored, digest);
             prefs.edit().putString("processed_message_digests_v2", updated)
                     .remove(legacyKey).apply();
         }
-        if (!legacyDuplicate) processMessage(body, group, posted);
     }
 
     private void processMessage(String body, String group, long posted) {
