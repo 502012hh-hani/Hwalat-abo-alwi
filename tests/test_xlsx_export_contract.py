@@ -47,9 +47,12 @@ assert "validateXlsx(temp, rows)" in write
 assert "validateXlsx(target, rows)" in write
 # A backup from an earlier crash must survive when the target is absent at retry.
 assert "if (hadTarget && backup.exists() && !backup.delete())" in write
-assert "if (backup.exists())" in write
+assert "boolean movedTargetToBackup = false;" in write
+assert "movedTargetToBackup = true;" in write
+assert "shouldRestoreWorkbookBackup(hadTarget, movedTargetToBackup, backup.exists())" in write
 assert "restoreWorkbookBackup(target, backup)" in write
-assert "if (hadTarget && backup.exists())" not in write
+assert "private boolean shouldRestoreWorkbookBackup(boolean hadTarget, boolean movedTargetToBackup," in MAIN
+assert "return backupExists && (!hadTarget || movedTargetToBackup);" in MAIN
 assert "private void restoreWorkbookBackup(File target, File backup)" in MAIN
 
 
