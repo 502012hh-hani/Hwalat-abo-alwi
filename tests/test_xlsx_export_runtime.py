@@ -77,6 +77,7 @@ signatures = [
     "private void appendXlsxRow(",
     "private String xmlEscape(",
     "private void restoreWorkbookBackup(File target, File backup)",
+    "private boolean shouldRestoreWorkbookBackup(boolean hadTarget, boolean movedTargetToBackup,",
     "private void putZipText(",
 ]
 methods = "\n\n".join(extract_method(x) for x in signatures)
@@ -125,6 +126,22 @@ __METHODS__
             throw new AssertionError("Interrupted export backup was not restored");
         }
         System.out.println("PASS: missing target + surviving .bak restores the last known workbook");
+
+        // A stale backup may remain after a successful replacement if cleanup was interrupted.
+        // If the current attempt fails before moving its existing target, preserve that target.
+        if (probe.shouldRestoreWorkbookBackup(true, false, true)) {
+            throw new AssertionError("A stale backup must not replace an untouched existing target");
+        }
+        if (!probe.shouldRestoreWorkbookBackup(true, true, true)) {
+            throw new AssertionError("A backup created by this failed replacement must be restored");
+        }
+        if (!probe.shouldRestoreWorkbookBackup(false, false, true)) {
+            throw new AssertionError("A sole surviving backup must be restored when target was absent");
+        }
+        if (probe.shouldRestoreWorkbookBackup(true, true, false)) {
+            throw new AssertionError("Cannot restore a backup that does not exist");
+        }
+        System.out.println("PASS: stale backup cannot overwrite a still-valid target after a failed retry");
     }
 }
 '''.replace("__METHODS__", methods)
