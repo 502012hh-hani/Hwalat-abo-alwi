@@ -415,6 +415,7 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
         File temp = new File(dir, fileName + ".tmp");
         File backup = new File(dir, fileName + ".bak");
         boolean hadTarget = target.exists();
+        boolean movedTargetToBackup = false;
         try {
             try (FileOutputStream out = new FileOutputStream(temp, false)) {
                 out.write(bytes);
@@ -422,14 +423,17 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
                 out.getFD().sync();
             }
             validateXlsx(temp, rows);
-            // If target is missing, a .bak may be the only surviving good workbook
-            // from a previous interrupted replacement. Keep it until the new target
-            // has been installed and fully validated.
+            // A leftover .bak beside a valid target can be from a previous export
+            // that completed but was interrupted before backup cleanup. Do not let
+            // a failure before this attempt moves target overwrite that newer target.
             if (hadTarget && backup.exists() && !backup.delete()) {
                 throw new Exception("تعذر حذف النسخة الاحتياطية السابقة: " + backup.getName());
             }
-            if (hadTarget && !target.renameTo(backup)) {
-                throw new Exception("تعذر حفظ نسخة احتياطية من ملف اليوم: " + target.getName());
+            if (hadTarget) {
+                if (!target.renameTo(backup)) {
+                    throw new Exception("تعذر حفظ نسخة احتياطية من ملف اليوم: " + target.getName());
+                }
+                movedTargetToBackup = true;
             }
             if (!temp.renameTo(target)) {
                 throw new Exception("تعذر اعتماد ملف Excel في التنزيلات: " + target.getAbsolutePath());
@@ -449,10 +453,11 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
             return rows.size();
         } catch (Exception ex) {
             if (temp.exists()) temp.delete();
-            if (backup.exists()) {
+            if (shouldRestoreWorkbookBackup(hadTarget, movedTargetToBackup, backup.exists())) {
                 try {
-                    // Also recover backups left by a previous run that crashed after
-                    // renaming target -> .bak while target was absent at this run's start.
+                    // Restore only a backup created by this failed replacement, or
+                    // the sole surviving backup when the target was already absent.
+                    // A stale backup must never overwrite a still-valid pre-existing target.
                     restoreWorkbookBackup(target, backup);
                 } catch (Exception restoreError) {
                     android.util.Log.e("HawalatExport", "Could not restore previous workbook from: "
@@ -463,6 +468,13 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
             }
             throw ex;
         }
+    }
+
+    // Restore after this attempt moved the target, or when a previous crash left
+    // no target at all. A stale .bak beside an untouched target is not authoritative.
+    private boolean shouldRestoreWorkbookBackup(boolean hadTarget, boolean movedTargetToBackup,
+            boolean backupExists) {
+        return backupExists && (!hadTarget || movedTargetToBackup);
     }
 
     // Restore the last known workbook after an interrupted replacement.
