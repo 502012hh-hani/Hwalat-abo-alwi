@@ -77,7 +77,7 @@ assert 'kept.append("\\n")' in cleanup
 assert 'kept.append("\\\\n")' not in cleanup
 
 # Repeated transfers are retained in SharedPreferences and highlighted in the workbook.
-assert 'prefs.edit().putString(key, row + (old.isEmpty() ? "" : "\\n" + old))' in save
+assert 'putString(key, row + (old.isEmpty() ? "" : "\\n" + old))' in save
 assert "duplicateRows.contains(i)" in xlsx
 assert "normalizeDuplicateName(row[0])" in xlsx
 assert "normalizeDuplicateAmount(row[1])" in xlsx
@@ -124,7 +124,18 @@ assert "synchronized (MainActivity.TRANSFER_DATA_LOCK)" in process_once
 assert "processedMessageDigest(signature)" in process_once
 assert '"processed_message_digests_v2"' in process_once
 assert "rememberProcessedMessageDigest(stored, digest)" in process_once
-assert process_once.index("if (!legacyDuplicate) processMessage(body, group, posted)") < process_once.index('putString("processed_message_digests_v2"')
+assert "transferSaved = processMessage(body, group, posted, digest, legacyKey)" in process_once
+assert "if (!transferSaved)" in process_once
+assert "boolean committed = prefs.edit()" in process_once
+assert ".remove(legacyKey).commit()" in process_once
+assert "private boolean processMessage(" in LISTENER
+assert "saveTransfer(group, name, amount, posted, digest, legacyKey)" in method(LISTENER, "private boolean processMessage(")
+assert "saveTransfer(group, name, pendingAmount, pendingTime, digest, legacyKey)" in method(LISTENER, "private boolean processMessage(")
+assert "saveTransfer(group, pendingName, amount, pendingTime, digest, legacyKey)" in method(LISTENER, "private boolean processMessage(")
+assert 'putString("processed_message_digests_v2", updatedDigests)' in save
+assert ".commit()" in save
+assert "if (!committed)" in save
+assert "throw new IllegalStateException" in save
 
 assert 'String legacyKey = "processed_message_" + Integer.toHexString(signature.hashCode())' in process_once
 assert "legacyDuplicate = signature.equals(prefs.getString(legacyKey, null))" in process_once

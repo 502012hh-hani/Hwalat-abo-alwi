@@ -375,21 +375,40 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             // Retire the old 32-bit entry when upgrading an already-seen message.
             String legacyKey = "processed_message_" + Integer.toHexString(signature.hashCode());
             boolean legacyDuplicate = signature.equals(prefs.getString(legacyKey, null));
-            // Process the transfer before recording its dedup marker. If processing
-            // fails or the process is interrupted, the message remains eligible for retry
-            // instead of being marked seen while its transfer row was never stored.
-            if (!legacyDuplicate) processMessage(body, group, posted);
+            boolean transferSaved = false;
+            if (!legacyDuplicate) {
+                try {
+                    // A completed transfer writes its row and this digest in one
+                    // SharedPreferences commit, so a process crash cannot persist
+                    // one without the other.
+                    transferSaved = processMessage(body, group, posted, digest, legacyKey);
+                } catch (RuntimeException saveError) {
+                    android.util.Log.e("HawalatListener", "Transfer was not durably saved; leave notification eligible for retry", saveError);
+                    setStatus("تعذر تثبيت الحوالة في التخزين؛ لم تُسجل الرسالة كمعالجة");
+                    return;
+                }
+            }
 
-            String updated = rememberProcessedMessageDigest(stored, digest);
-            prefs.edit().putString("processed_message_digests_v2", updated)
-                    .remove(legacyKey).apply();
+            if (!transferSaved) {
+                // Pending fragments and non-transfer notifications still need a
+                // durable dedup marker. commit() also flushes pending state written
+                // immediately before this point in the same preferences file.
+                String updated = rememberProcessedMessageDigest(stored, digest);
+                boolean committed = prefs.edit().putString("processed_message_digests_v2", updated)
+                        .remove(legacyKey).commit();
+                if (!committed) {
+                    android.util.Log.e("HawalatListener", "Could not durably store notification dedup marker");
+                    setStatus("تعذر تثبيت علامة معالجة الإشعار؛ ستبقى الرسالة قابلة لإعادة المعالجة");
+                }
+            }
         }
     }
 
-    private void processMessage(String body, String group, long posted) {
+    private boolean processMessage(String body, String group, long posted,
+            String digest, String legacyKey) {
         if (body == null || body.trim().isEmpty()) {
             setStatus("وصل إشعار من " + group + " لكن نص الرسالة غير ظاهر");
-            return;
+            return false;
         }
 
         // بعض إصدارات واتساب تمرر فواصل الأسطر كنص حرفي "\\n".
@@ -419,21 +438,21 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
         // إذا وصل الاسم والمبلغ معاً في الرسالة نفسها، لا نخلطهما مع جزء قديم.
         if (!name.isEmpty() && !amount.isEmpty()) {
-            saveTransfer(group, name, amount, posted);
+            saveTransfer(group, name, amount, posted, digest, legacyKey);
             prefs.edit().remove(pendingKey).apply();
-            return;
+            return true;
         }
 
         // الرسائل المقسمة: نكمل فقط الجزء الناقص خلال عشر دقائق.
         if (!name.isEmpty() && pendingName.isEmpty() && !pendingAmount.isEmpty()) {
-            saveTransfer(group, name, pendingAmount, pendingTime);
+            saveTransfer(group, name, pendingAmount, pendingTime, digest, legacyKey);
             prefs.edit().remove(pendingKey).apply();
-            return;
+            return true;
         }
         if (!amount.isEmpty() && pendingAmount.isEmpty() && !pendingName.isEmpty()) {
-            saveTransfer(group, pendingName, amount, pendingTime);
+            saveTransfer(group, pendingName, amount, pendingTime, digest, legacyKey);
             prefs.edit().remove(pendingKey).apply();
-            return;
+            return true;
         }
 
         if (!name.isEmpty() || !amount.isEmpty()) {
@@ -442,31 +461,40 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                     .putString("last_status", "تم حفظ جزء من حوالة من " + group
                             + "؛ ننتظر الجزء المكمل خلال 10 دقائق")
                     .apply();
+            return false;
         } else {
             setStatus("وصلت رسالة من المرسل المطلوب في " + group
                     + " لكن لم أتعرف على اسم مستلم أو مبلغ صالح؛ تم تجاهل أرقام الحساب وعبارات الحساب");
+            return false;
         }
     }
 
-    private void saveTransfer(String group, String name, String amount, long timeMillis) {
-synchronized (MainActivity.TRANSFER_DATA_LOCK) {
-
-        String date = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(timeMillis));
-        String time = new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date(timeMillis));
-        String key = "rows_" + group;
-        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        String old = prefs.getString(key, "");
-        // Keep every legitimate transfer, including repeated recipient/amount pairs.
-        // Export marks repeated pairs visually; notification reposts are filtered separately
-        // by the active-notification signature before reaching this method.
-        String row = date + "\t" + time + "\t" + name + "\t" + amount;
-        prefs.edit().putString(key, row + (old.isEmpty() ? "" : "\n" + old))
-                .putString("last_status", "تم تسجيل حوالة: " + name + " - " + amount
-                        + " (" + group + ")" + (containsSameTransfer(old, date, name, amount)
-                        ? " — تكرار محفوظ وسيُميّز في Excel" : ""))
-                .apply();
-    
-}
+    private void saveTransfer(String group, String name, String amount, long timeMillis,
+            String digest, String legacyKey) {
+        synchronized (MainActivity.TRANSFER_DATA_LOCK) {
+            String date = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(timeMillis));
+            String time = new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date(timeMillis));
+            String key = "rows_" + group;
+            android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+            String old = prefs.getString(key, "");
+            // Keep every legitimate transfer, including repeated recipient/amount pairs.
+            // Export marks repeated pairs visually; notification reposts are filtered separately
+            // by the active-notification signature before reaching this method.
+            String row = date + "\t" + time + "\t" + name + "\t" + amount;
+            String updatedDigests = rememberProcessedMessageDigest(
+                    prefs.getString("processed_message_digests_v2", ""), digest);
+            boolean committed = prefs.edit()
+                    .putString(key, row + (old.isEmpty() ? "" : "\n" + old))
+                    .putString("processed_message_digests_v2", updatedDigests)
+                    .remove(legacyKey)
+                    .putString("last_status", "تم تسجيل حوالة: " + name + " - " + amount
+                            + " (" + group + ")" + (containsSameTransfer(old, date, name, amount)
+                            ? " — تكرار محفوظ وسيُميّز في Excel" : ""))
+                    .commit();
+            if (!committed) {
+                throw new IllegalStateException("SharedPreferences commit failed while saving transfer and dedup marker");
+            }
+        }
     }
 
     private boolean containsSameTransfer(String old, String date, String name, String amount) {
