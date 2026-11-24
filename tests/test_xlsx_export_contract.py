@@ -46,7 +46,11 @@ assert 'new FileOutputStream(temp, false)' in write
 assert "validateXlsx(temp, rows)" in write
 assert "validateXlsx(target, rows)" in write
 # A backup from an earlier crash must survive when the target is absent at retry.
-assert "if (hadTarget && backup.exists() && !backup.delete())" in write
+assert "retainPreviousWorkbookBackup(backup, fileName)" in write
+assert write.index("retainPreviousWorkbookBackup(backup, fileName)") < write.index("target.renameTo(backup)")
+assert write.index("validateXlsx(target, rows)") < write.index("boolean currentBackupRemoved")
+assert 'name.startsWith(fileName + ".bak.previous.")' in write
+assert "private File retainPreviousWorkbookBackup(File backup, String fileName)" in MAIN
 assert "boolean movedTargetToBackup = false;" in write
 assert "movedTargetToBackup = true;" in write
 assert "shouldRestoreWorkbookBackup(hadTarget, movedTargetToBackup, backup.exists())" in write

@@ -77,6 +77,7 @@ signatures = [
     "private void appendXlsxRow(",
     "private String xmlEscape(",
     "private void restoreWorkbookBackup(File target, File backup)",
+    "private File retainPreviousWorkbookBackup(File backup, String fileName)",
     "private boolean shouldRestoreWorkbookBackup(boolean hadTarget, boolean movedTargetToBackup,",
     "private void putZipText(",
 ]
@@ -142,6 +143,33 @@ __METHODS__
             throw new AssertionError("Cannot restore a backup that does not exist");
         }
         System.out.println("PASS: stale backup cannot overwrite a still-valid target after a failed retry");
+
+        // When both target and a leftover .bak exist, preserve the .bak instead of
+        // deleting it before the current target is moved and the new workbook is verified.
+        File retainedDir = new File(args[2]);
+        if (!retainedDir.mkdirs() && !retainedDir.isDirectory()) {
+            throw new IOException("Could not create retained-backup test directory");
+        }
+        File currentTarget = new File(retainedDir, "العمقي-2026-11-20.xlsx");
+        File staleBackup = new File(retainedDir, "العمقي-2026-11-20.xlsx.bak");
+        try (FileOutputStream currentOut = new FileOutputStream(currentTarget)) {
+            currentOut.write("newer-current-target".getBytes(StandardCharsets.UTF_8));
+        }
+        try (FileOutputStream staleOut = new FileOutputStream(staleBackup)) {
+            staleOut.write("older-last-known-good-backup".getBytes(StandardCharsets.UTF_8));
+        }
+        File retainedBackup = probe.retainPreviousWorkbookBackup(
+                staleBackup, currentTarget.getName());
+        String currentBytes = new String(java.nio.file.Files.readAllBytes(currentTarget.toPath()),
+                StandardCharsets.UTF_8);
+        String retainedBytes = new String(java.nio.file.Files.readAllBytes(retainedBackup.toPath()),
+                StandardCharsets.UTF_8);
+        if (staleBackup.exists() || !currentTarget.isFile()
+                || !"newer-current-target".equals(currentBytes)
+                || !"older-last-known-good-backup".equals(retainedBytes)) {
+            throw new AssertionError("Existing target or previous backup was not preserved");
+        }
+        System.out.println("PASS: existing target and stale .bak are both preserved before replacement");
     }
 }
 '''.replace("__METHODS__", methods)
@@ -152,7 +180,7 @@ with tempfile.TemporaryDirectory(prefix="hawalat-xlsx-") as tmp:
     output = root / "probe.xlsx"
     java_file.write_text(harness, encoding="utf-8")
     subprocess.run(["javac", "-encoding", "UTF-8", str(java_file)], check=True)
-    subprocess.run(["java", "-cp", str(root), "XlsxRuntimeProbe", str(output), str(root / "recovery")], check=True)
+    subprocess.run(["java", "-cp", str(root), "XlsxRuntimeProbe", str(output), str(root / "recovery"), str(root / "retained")], check=True)
 
     with zipfile.ZipFile(output) as workbook:
         assert workbook.testzip() is None, "XLSX ZIP CRC check failed"

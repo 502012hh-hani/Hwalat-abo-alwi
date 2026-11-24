@@ -423,11 +423,11 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
                 out.getFD().sync();
             }
             validateXlsx(temp, rows);
-            // A leftover .bak beside a valid target can be from a previous export
-            // that completed but was interrupted before backup cleanup. Do not let
-            // a failure before this attempt moves target overwrite that newer target.
-            if (hadTarget && backup.exists() && !backup.delete()) {
-                throw new Exception("تعذر حذف النسخة الاحتياطية السابقة: " + backup.getName());
+            // A .bak left by an interrupted export may be the only known-good
+            // workbook. Preserve it under a unique name until this replacement passes
+            // validation; never delete it before the new public file is verified.
+            if (hadTarget && backup.exists()) {
+                retainPreviousWorkbookBackup(backup, fileName);
             }
             if (hadTarget) {
                 if (!target.renameTo(backup)) {
@@ -444,9 +444,21 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
             // Keep the previous workbook until the final public Downloads copy
             // has passed the same XLSX and row-count validation as the temp file.
             validateXlsx(target, rows);
-            if (backup.exists() && !backup.delete()) {
-                android.util.Log.w("HawalatExport", "Verified workbook saved; old backup retained at "
+            boolean currentBackupRemoved = !backup.exists() || backup.delete();
+            if (!currentBackupRemoved) {
+                android.util.Log.w("HawalatExport", "Verified workbook saved; current backup retained at "
                         + backup.getAbsolutePath());
+            } else {
+                File[] retainedBackups = dir.listFiles((parent, name) ->
+                        name.startsWith(fileName + ".bak.previous."));
+                if (retainedBackups != null) {
+                    for (File retainedBackup : retainedBackups) {
+                        if (retainedBackup.isFile() && !retainedBackup.delete()) {
+                            android.util.Log.w("HawalatExport", "Could not remove verified old backup: "
+                                    + retainedBackup.getAbsolutePath());
+                        }
+                    }
+                }
             }
             android.util.Log.i("HawalatExport", "Direct XLSX saved: "
                     + target.getAbsolutePath() + ", rows=" + rows.size() + ", bytes=" + bytes.length);
@@ -472,6 +484,28 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
 
     // Restore after this attempt moved the target, or when a previous crash left
     // no target at all. A stale .bak beside an untouched target is not authoritative.
+    private File retainPreviousWorkbookBackup(File backup, String fileName) throws Exception {
+        if (backup == null || !backup.exists()) return null;
+        if (!backup.isFile()) {
+            throw new Exception("النسخة الاحتياطية السابقة ليست ملفاً صالحاً: " + backup.getName());
+        }
+        File dir = backup.getParentFile();
+        if (dir == null || !dir.isDirectory()) {
+            throw new Exception("مجلد النسخة الاحتياطية غير متاح");
+        }
+        String prefix = fileName + ".bak.previous.";
+        long stamp = System.currentTimeMillis();
+        File retained = new File(dir, prefix + stamp);
+        int suffix = 1;
+        while (retained.exists()) {
+            retained = new File(dir, prefix + stamp + "." + suffix++);
+        }
+        if (!backup.renameTo(retained)) {
+            throw new Exception("تعذر الاحتفاظ بالنسخة الاحتياطية السابقة: " + backup.getName());
+        }
+        return retained;
+    }
+
     private boolean shouldRestoreWorkbookBackup(boolean hadTarget, boolean movedTargetToBackup,
             boolean backupExists) {
         return backupExists && (!hadTarget || movedTargetToBackup);
