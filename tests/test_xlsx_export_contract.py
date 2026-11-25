@@ -34,6 +34,7 @@ export = method(MAIN, "private void exportFiles()")
 export_one = method(MAIN, "private void exportOneGroup(")
 xlsx = method(MAIN, "private byte[] buildXlsxBytes(")
 save = method(LISTENER, "private void saveTransfer(")
+process_message = method(LISTENER, "private boolean processMessage(")
 
 # Separate daily workbook per group/date; export is a replacement snapshot, not append.
 assert 'String[] labels = {"العمقي", "بن دول"}' in export
@@ -155,6 +156,13 @@ assert 'putString("processed_message_digests_v2", updatedDigests)' in save
 assert ".commit()" in save
 assert "if (!committed)" in save
 assert "throw new IllegalStateException" in save
+
+# Completing a split transfer must clear its pending fragment in the same durable
+# SharedPreferences commit as the row and dedup digest. A crash between two
+# separate apply() calls could otherwise pair a future message with stale data.
+assert '.remove("pending_" + group)' in save
+assert save.index('.remove("pending_" + group)') < save.index('.commit()')
+assert process_message.count('prefs.edit().remove(pendingKey).apply();') == 1
 
 assert 'String legacyKey = "processed_message_" + Integer.toHexString(signature.hashCode())' in process_once
 assert "legacyDuplicate = signature.equals(prefs.getString(legacyKey, null))" in process_once
