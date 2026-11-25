@@ -59,10 +59,26 @@ def extract_method(signature: str) -> str:
     raise AssertionError(f"Unbalanced method: {signature}")
 
 
+active_probe = extract_method("private void processIfActiveNotificationChanged(")
+handler = extract_method("private boolean handleNotificationPosted(")
+process_once = extract_method("private boolean processMessageOnce(")
+assert "activeNotificationPreferenceKey(sbn.getKey())" in active_probe
+assert "boolean handled = handleNotificationPosted(sbn, false);" in active_probe
+assert active_probe.index("handleNotificationPosted(sbn, false)") < active_probe.index(
+    'prefs.edit().putString(key, signature).remove(legacyKey).commit()'
+)
+assert "if (handled)" in active_probe
+assert "if (!handled)" in active_probe
+assert "return false;" in process_once
+assert "return true;" in process_once
+assert "if (!processMessageOnce(structuredTexts.get(i), group, structuredTimes.get(i)))" in handler
+assert "return processMessageOnce(body, group, posted);" in handler
+
 methods = "\n\n".join(
     extract_method(signature)
     for signature in (
         "private String processedMessageDigest(",
+        "private String activeNotificationPreferenceKey(",
         "private boolean hasProcessedMessageDigest(",
         "private String rememberProcessedMessageDigest(",
     )
@@ -81,6 +97,13 @@ __METHODS__
         }
         String firstDigest = probe.processedMessageDigest(first);
         String secondDigest = probe.processedMessageDigest(collision);
+        String activeKeyA = probe.activeNotificationPreferenceKey("Aa");
+        String activeKeyB = probe.activeNotificationPreferenceKey("BB");
+        if ("Aa".hashCode() != "BB".hashCode() || activeKeyA.equals(activeKeyB)
+                || !activeKeyA.startsWith("active_seen_v2_")
+                || activeKeyA.length() != "active_seen_v2_".length() + 64) {
+            throw new AssertionError("Active notification preference keys must use collision-resistant SHA-256");
+        }
         if (firstDigest.equals(secondDigest) || firstDigest.length() != 64 || secondDigest.length() != 64) {
             throw new AssertionError("SHA-256 message identities are not distinct 64-character digests");
         }
@@ -109,6 +132,8 @@ __METHODS__
             throw new AssertionError("Remembering the same digest created a duplicate cache entry");
         }
         System.out.println("PASS: SHA-256 distinguishes two strings with the same Java hashCode");
+        System.out.println("PASS: active notification keys are collision-resistant SHA-256 values");
+        System.out.println("PASS: active notification signatures advance only after durable processing");
         System.out.println("PASS: dedup cache remains bounded at 2048 signatures");
         System.out.println("PASS: cache retains recent signatures and does not duplicate an existing digest");
     }

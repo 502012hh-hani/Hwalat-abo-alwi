@@ -146,31 +146,65 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         return value.toString();
     }
 
+    private String activeNotificationPreferenceKey(String notificationKey) {
+        return "active_seen_v2_" + processedMessageDigest(notificationKey == null ? "" : notificationKey);
+    }
+
     private void processIfActiveNotificationChanged(StatusBarNotification sbn) {
         if (sbn == null) return;
         try {
-            Bundle extras = sbn.getNotification() == null ? null : sbn.getNotification().extras;
             String signature = buildActiveNotificationSignature(sbn);
-            String key = "active_seen_" + Integer.toHexString(sbn.getKey().hashCode());
+            String key = activeNotificationPreferenceKey(sbn.getKey());
+            // Read the old 32-bit key only for exact-signature migration. Never trust
+            // its hash alone because two different notification keys can collide.
+            String legacyKey = "active_seen_" + Integer.toHexString(sbn.getKey().hashCode());
             android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
             String previous = prefs.getString(key, null);
-            if (previous == null) {
-                prefs.edit().putString(key, signature).apply();
-                // Recover a notification posted after this listener connection if
-                // Android did not deliver onNotificationPosted for it.
-                long connectedAt = prefs.getLong("listener_connected_at_ms", 0L);
-                if (connectedAt > 0L && sbn.getPostTime() >= connectedAt - 2000L) {
-                    handleNotificationPosted(sbn, false);
+            if (signature.equals(previous)) return;
+
+            String legacyPrevious = previous == null ? prefs.getString(legacyKey, null) : null;
+            if (signature.equals(legacyPrevious)) {
+                boolean migrated = prefs.edit().putString(key, signature).remove(legacyKey).commit();
+                if (!migrated) {
+                    android.util.Log.w("HawalatListener", "Could not migrate active notification signature");
                 }
-            } else if (!previous.equals(signature)) {
-                prefs.edit().putString(key, signature).apply();
-                handleNotificationPosted(sbn, false);
+                return;
             }
-        } catch (Exception ignored) {}
+
+            // A changed v2 or legacy signature must be processed. A notification
+            // with no prior signature is only seeded when it arrived after connect.
+            boolean shouldProcess = previous != null || legacyPrevious != null;
+            if (!shouldProcess) {
+                long connectedAt = prefs.getLong("listener_connected_at_ms", 0L);
+                shouldProcess = connectedAt > 0L && sbn.getPostTime() >= connectedAt - 2000L;
+            }
+            if (!shouldProcess) {
+                boolean seeded = prefs.edit().putString(key, signature).remove(legacyKey).commit();
+                if (!seeded) {
+                    android.util.Log.w("HawalatListener", "Could not persist initial active notification signature");
+                }
+                return;
+            }
+
+            // Crucially, do not advance active_seen until every message in this
+            // notification has a durable transfer row or durable dedup marker.
+            // If SharedPreferences.commit fails, the next 5-second probe retries it.
+            boolean handled = handleNotificationPosted(sbn, false);
+            if (handled) {
+                boolean committed = prefs.edit().putString(key, signature).remove(legacyKey).commit();
+                if (!committed) {
+                    android.util.Log.w("HawalatListener", "Could not persist processed active notification signature; it will be retried safely");
+                }
+            } else {
+                android.util.Log.w("HawalatListener", "Active notification processing was not durable; leaving signature unchanged for retry");
+            }
+        } catch (Exception ex) {
+            android.util.Log.w("HawalatListener", "Active notification probe failed; signature remains eligible for retry", ex);
+        }
     }
 
-    private void handleNotificationPosted(StatusBarNotification sbn, boolean recordCallback) {
-        if (sbn == null) return;
+    private boolean handleNotificationPosted(StatusBarNotification sbn, boolean recordCallback) {
+        if (sbn == null) return false;
         // Record raw Android callback arrival before filtering by app, group, or sender.
         // This makes the diagnostic truthful even when the notification is unrelated.
         if (recordCallback) {
@@ -193,7 +227,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                 || "com.whatsapp.w4b".equals(packageName);
         String group = isTargetGroup(title + " " + sub + " " + conversation);
         // تجاهل أي إشعار ليس من واتساب أو ليس من إحدى المجموعتين المستهدفتين.
-        if (!whatsappPackage || group.isEmpty()) return;
+        if (!whatsappPackage || group.isEmpty()) return true;
 
         // WhatsApp group messages are commonly delivered as MessagingStyle.
         // Their actual author and text live in EXTRA_MESSAGES, not necessarily
@@ -234,7 +268,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         // لا نسجل حتى إشعارات المجموعة إلا إذا كان المرسل هو أبو علوي المطلوب.
         boolean legacySenderMatched = isTargetSender(title) || isTargetSender(sub)
                 || isTargetSender(conversation) || isTargetSender(body);
-        if (!structuredSenderMatched && !legacySenderMatched) return;
+        if (!structuredSenderMatched && !legacySenderMatched) return true;
 
         long posted = sbn.getPostTime();
         String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(posted));
@@ -262,11 +296,11 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         diagnostic.apply();
 
         // Only WhatsApp notifications are shown in the "last WhatsApp" field.
-        if (!whatsappPackage) return;
+        if (!whatsappPackage) return true;
         setStatus("وصل إشعار واتساب؛ جارٍ التحقق من المرسل والمجموعة");
         if (e == null) {
             setStatus("وصل إشعار واتساب لكن بياناته النصية غير متاحة");
-            return;
+            return false;
         }
 
         CharSequence[] lines = e.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
@@ -282,11 +316,13 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         if (structuredSenderMatched && !structuredTexts.isEmpty()) {
             // عالج كل رسالة أصلية من أبو علوي وحدها؛ لا تدمج أسماء ومبالغ رسائل مختلفة.
             for (int i = 0; i < structuredTexts.size(); i++) {
-                processMessageOnce(structuredTexts.get(i), group, structuredTimes.get(i));
+                if (!processMessageOnce(structuredTexts.get(i), group, structuredTimes.get(i))) {
+                    return false;
+                }
             }
-        } else {
-            processMessageOnce(body, group, posted);
+            return true;
         }
+        return processMessageOnce(body, group, posted);
     }
 
     private String isTargetGroup(String value) {
@@ -364,13 +400,13 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
 
     // Prevent the same WhatsApp MessagingStyle history item from being saved again
     // when WhatsApp reposts an updated notification containing older messages.
-    private void processMessageOnce(String body, String group, long posted) {
+    private boolean processMessageOnce(String body, String group, long posted) {
         String signature = group + "|" + posted + "|" + (body == null ? "" : body.trim());
         String digest = processedMessageDigest(signature);
         synchronized (MainActivity.TRANSFER_DATA_LOCK) {
             android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
             String stored = prefs.getString("processed_message_digests_v2", "");
-            if (hasProcessedMessageDigest(stored, digest)) return;
+            if (hasProcessedMessageDigest(stored, digest)) return true;
 
             // Retire the old 32-bit entry when upgrading an already-seen message.
             String legacyKey = "processed_message_" + Integer.toHexString(signature.hashCode());
@@ -385,7 +421,7 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                 } catch (RuntimeException saveError) {
                     android.util.Log.e("HawalatListener", "Transfer was not durably saved; leave notification eligible for retry", saveError);
                     setStatus("تعذر تثبيت الحوالة في التخزين؛ لم تُسجل الرسالة كمعالجة");
-                    return;
+                    return false;
                 }
             }
 
@@ -399,8 +435,10 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
                 if (!committed) {
                     android.util.Log.e("HawalatListener", "Could not durably store notification dedup marker");
                     setStatus("تعذر تثبيت علامة معالجة الإشعار؛ ستبقى الرسالة قابلة لإعادة المعالجة");
+                    return false;
                 }
             }
+            return true;
         }
     }
 
