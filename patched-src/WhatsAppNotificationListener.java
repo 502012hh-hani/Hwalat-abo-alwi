@@ -477,19 +477,16 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
         // إذا وصل الاسم والمبلغ معاً في الرسالة نفسها، لا نخلطهما مع جزء قديم.
         if (!name.isEmpty() && !amount.isEmpty()) {
             saveTransfer(group, name, amount, posted, digest, legacyKey);
-            prefs.edit().remove(pendingKey).apply();
             return true;
         }
 
         // الرسائل المقسمة: نكمل فقط الجزء الناقص خلال عشر دقائق.
         if (!name.isEmpty() && pendingName.isEmpty() && !pendingAmount.isEmpty()) {
             saveTransfer(group, name, pendingAmount, pendingTime, digest, legacyKey);
-            prefs.edit().remove(pendingKey).apply();
             return true;
         }
         if (!amount.isEmpty() && pendingAmount.isEmpty() && !pendingName.isEmpty()) {
             saveTransfer(group, pendingName, amount, pendingTime, digest, legacyKey);
-            prefs.edit().remove(pendingKey).apply();
             return true;
         }
 
@@ -524,6 +521,8 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             boolean committed = prefs.edit()
                     .putString(key, row + (old.isEmpty() ? "" : "\n" + old))
                     .putString("processed_message_digests_v2", updatedDigests)
+                    // Clear any paired fragment in the same durable commit as its completed row.
+                    .remove("pending_" + group)
                     .remove(legacyKey)
                     .putString("last_status", "تم تسجيل حوالة: " + name + " - " + amount
                             + " (" + group + ")" + (containsSameTransfer(old, date, name, amount)
