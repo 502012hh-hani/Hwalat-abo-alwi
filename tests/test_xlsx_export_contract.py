@@ -122,8 +122,21 @@ assert "getStoredDatesFromData(snapshots[i])" in export
 assert "writeGroupToDownloads(labels[i], keys[i], date, snapshots[i])" in export
 assert "Download/أبو علوي" in export
 
+# Active notification polling must retry a failed durable save instead of
+# recording the notification signature before its transfer has been committed.
+assert "activeNotificationPreferenceKey(sbn.getKey())" in active_probe
+assert "boolean handled = handleNotificationPosted(sbn, false);" in active_probe
+assert active_probe.index("boolean handled = handleNotificationPosted(sbn, false);") < active_probe.index("if (handled)")
+assert active_probe.rindex('prefs.edit().putString(key, signature).remove(legacyKey).commit()') > active_probe.index("if (handled)")
+assert "return false;" in process_once
+assert "return true;" in process_once
+assert "if (!processMessageOnce(structuredTexts.get(i), group, structuredTimes.get(i)))" in active_handler
+assert "return processMessageOnce(body, group, posted);" in active_handler
+
 # Reposted notification dedup uses a collision-resistant digest and bounded cache.
-process_once = method(LISTENER, "private void processMessageOnce(")
+process_once = method(LISTENER, "private boolean processMessageOnce(")
+active_probe = method(LISTENER, "private void processIfActiveNotificationChanged(")
+active_handler = method(LISTENER, "private boolean handleNotificationPosted(")
 assert "synchronized (MainActivity.TRANSFER_DATA_LOCK)" in process_once
 assert "processedMessageDigest(signature)" in process_once
 assert '"processed_message_digests_v2"' in process_once
