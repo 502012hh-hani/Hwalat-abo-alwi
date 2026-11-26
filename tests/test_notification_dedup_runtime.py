@@ -64,9 +64,17 @@ handler = extract_method("private boolean handleNotificationPosted(")
 process_once = extract_method("private boolean processMessageOnce(")
 assert "activeNotificationPreferenceKey(sbn.getKey())" in active_probe
 assert "boolean handled = handleNotificationPosted(sbn, false);" in active_probe
-assert active_probe.index("handleNotificationPosted(sbn, false)") < active_probe.index(
+# Earlier commits in this method only migrate legacy keys or seed an
+# unchanged notification. Verify that the final signature commit happens
+# after the actual message-processing call, so a failed/partial process is retried.
+processing_call = active_probe.index("boolean handled = handleNotificationPosted(sbn, false);")
+durable_commit = active_probe.rfind(
     'prefs.edit().putString(key, signature).remove(legacyKey).commit()'
 )
+assert processing_call < durable_commit, (
+    "Active notification signature must be committed only after durable processing"
+)
+assert active_probe.index("if (handled)", processing_call) < durable_commit
 assert "if (handled)" in active_probe
 assert "if (!handled)" in active_probe
 assert "return false;" in process_once
