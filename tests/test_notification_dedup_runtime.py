@@ -75,8 +75,12 @@ assert processing_call < durable_commit, (
     "Active notification signature must be committed only after durable processing"
 )
 assert active_probe.index("if (handled)", processing_call) < durable_commit
-assert "if (handled)" in active_probe
-assert "if (!handled)" in active_probe
+handled_branch = active_probe.index("if (handled)")
+retry_branch = active_probe.index("else {", handled_branch)
+assert handled_branch < durable_commit < retry_branch, (
+    "Only the successful handled branch may commit the active notification signature"
+)
+assert "Active notification processing was not durable; leaving signature unchanged for retry" in active_probe[retry_branch:]
 assert "return false;" in process_once
 assert "return true;" in process_once
 assert "if (!processMessageOnce(structuredTexts.get(i), group, structuredTimes.get(i)))" in handler
