@@ -69,6 +69,8 @@ def extract_method(signature: str) -> str:
 
 
 signatures = [
+    "private String dailyWorkbookName(",
+    "private ArrayList<String[]> getRowsForDate(",
     "private byte[] buildXlsxBytes(",
     "private void validateXlsx(",
     "private String[] readXlsxRow(",
@@ -99,6 +101,18 @@ __METHODS__
         rows.add(new String[]{"علي & <خالد>", "٥٠٠", "2026-11-15", "12:01:00"});
         rows.add(new String[]{"سالم", "200", "2026-11-15", "11:59:00"});
         XlsxRuntimeProbe probe = new XlsxRuntimeProbe();
+        String aroundMidnight = "2026-11-28\\t23:59:59\\tقبل منتصف الليل\\t100\\n"
+                + "2026-11-29\\t00:00:01\\tبعد منتصف الليل\\t200";
+        ArrayList<String[]> beforeMidnight = probe.getRowsForDate(aroundMidnight, "2026-11-28");
+        ArrayList<String[]> afterMidnight = probe.getRowsForDate(aroundMidnight, "2026-11-29");
+        if (beforeMidnight.size() != 1 || afterMidnight.size() != 1
+                || !"قبل منتصف الليل".equals(beforeMidnight.get(0)[0])
+                || !"بعد منتصف الليل".equals(afterMidnight.get(0)[0])
+                || !"العمقي-2026-11-28.xlsx".equals(probe.dailyWorkbookName("العمقي", "2026-11-28"))
+                || !"العمقي-2026-11-29.xlsx".equals(probe.dailyWorkbookName("العمقي", "2026-11-29"))) {
+            throw new AssertionError("Transfers around midnight must be isolated into their own daily workbook");
+        }
+        System.out.println("PASS: production row selector separates transfers on opposite sides of midnight");
         byte[] bytes = probe.buildXlsxBytes(rows);
         File output = new File(args[0]);
         try (FileOutputStream stream = new FileOutputStream(output)) {
