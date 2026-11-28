@@ -28,6 +28,8 @@ def method(source: str, signature: str) -> str:
 
 
 write = method(MAIN, "private int writeGroupToDownloads(")
+rows_for_date = method(MAIN, "private ArrayList<String[]> getRowsForDate(")
+daily_name = method(MAIN, "private String dailyWorkbookName(")
 validate = method(MAIN, "private void validateXlsx(")
 cleanup = method(MAIN, "private int removePreviouslyExportedDays(")
 export = method(MAIN, "private void exportFiles()")
@@ -39,7 +41,11 @@ process_message = method(LISTENER, "private boolean processMessage(")
 # Separate daily workbook per group/date; export is a replacement snapshot, not append.
 assert 'String[] labels = {"العمقي", "بن دول"}' in export
 assert 'String[] keys = {"rows_العمقي", "rows_بن دول » محمد علوي احمد"}' in export
-assert 'label + "-" + date + ".xlsx"' in write
+assert "dailyWorkbookName(label, date)" in write
+assert 'return label + "-" + date + ".xlsx";' in daily_name
+assert "getRowsForDate(data, date)" in write
+assert "date.equals(p[0])" in rows_for_date
+assert "new String[]{p[2], p[3], p[0], p[1]}" in rows_for_date
 assert 'date.equals(p[0])' in write
 assert 'new String[]{p[2], p[3], p[0], p[1]}' in write
 assert "buildXlsxBytes(rows)" in write
