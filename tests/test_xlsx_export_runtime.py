@@ -101,8 +101,8 @@ __METHODS__
         rows.add(new String[]{"علي & <خالد>", "٥٠٠", "2026-11-15", "12:01:00"});
         rows.add(new String[]{"سالم", "200", "2026-11-15", "11:59:00"});
         XlsxRuntimeProbe probe = new XlsxRuntimeProbe();
-        String aroundMidnight = "2026-11-28\\t23:59:59\\tقبل منتصف الليل\\t100\\n"
-                + "2026-11-29\\t00:00:01\\tبعد منتصف الليل\\t200";
+        String aroundMidnight = "2026-11-28\t23:59:59\tقبل منتصف الليل\t100\n"
+                + "2026-11-29\t00:00:01\tبعد منتصف الليل\t200";
         ArrayList<String[]> beforeMidnight = probe.getRowsForDate(aroundMidnight, "2026-11-28");
         ArrayList<String[]> afterMidnight = probe.getRowsForDate(aroundMidnight, "2026-11-29");
         if (beforeMidnight.size() != 1 || afterMidnight.size() != 1
