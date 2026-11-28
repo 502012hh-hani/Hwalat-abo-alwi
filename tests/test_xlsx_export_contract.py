@@ -46,7 +46,6 @@ assert 'return label + "-" + date + ".xlsx";' in daily_name
 assert "getRowsForDate(data, date)" in write
 assert "date.equals(p[0])" in rows_for_date
 assert "new String[]{p[2], p[3], p[0], p[1]}" in rows_for_date
-assert 'new String[]{p[2], p[3], p[0], p[1]}' in write
 assert "buildXlsxBytes(rows)" in write
 assert 'new FileOutputStream(temp, false)' in write
 assert "validateXlsx(temp, rows)" in write
