@@ -365,8 +365,13 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
         }
     }
 
-    private int writeGroupToDownloads(String label, String prefKey, String date, String data) throws Exception {
-        final String fileName = label + "-" + date + ".xlsx";
+    // Keep date partitioning in small pure-Java helpers so midnight rollover
+    // can be exercised against the exact production row-selection logic.
+    private String dailyWorkbookName(String label, String date) {
+        return label + "-" + date + ".xlsx";
+    }
+
+    private ArrayList<String[]> getRowsForDate(String data, String date) {
         ArrayList<String[]> rows = new ArrayList<>();
         if (data != null && !data.isEmpty()) {
             for (String row : data.split("\\n")) {
@@ -376,6 +381,11 @@ synchronized (MainActivity.TRANSFER_DATA_LOCK) {
                 }
             }
         }
+        return rows;
+    }
+    private int writeGroupToDownloads(String label, String prefKey, String date, String data) throws Exception {
+        final String fileName = dailyWorkbookName(label, date);
+        ArrayList<String[]> rows = getRowsForDate(data, date);
         if (rows.isEmpty()) throw new Exception("لا توجد سجلات بتاريخ " + date + " للمجموعة " + label);
 
         // Redmi Note 8 / Android 10: targetSdk 28 uses legacy external-storage
